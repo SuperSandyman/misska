@@ -1,0 +1,44 @@
+{
+    "name": "misskey-cli-client",
+    "version": "1.0.0",
+    "type": "module",
+    "bin": {
+        "misska": "./dist/src/misskey-cli.js"
+    },
+    "scripts": {
+        "dev": "tsx src/misskey-cli.tsx",
+        "build": "tsc -p .",
+        "start": "node dist/src/misskey-cli.js",
+        "lint": "eslint 'src/**/*.{ts,tsx}'",
+        "test": "jest"
+    },
+    "keywords": [],
+    "author": "",
+    "license": "ISC",
+    "description": "",
+    "devDependencies": {
+        "@types/jest": "^30.0.0",
+        "@types/node": "^22.9.3",
+        "@types/react": "^19.0.0",
+        "@typescript-eslint/eslint-plugin": "^8.39.0",
+        "@typescript-eslint/parser": "^8.39.0",
+        "eslint": "^9.32.0",
+        "jest": "^30.0.5",
+        "prettier": "^3.6.2",
+        "ts-jest": "^29.4.1",
+        "tsx": "^4.20.3",
+        "typescript": "^5.9.2"
+    },
+    "dependencies": {
+        "conf": "^14.0.0",
+        "ink": "^6.1.0",
+        "ink-select-input": "^6.2.0",
+        "ink-text-input": "^6.0.0",
+        "keytar": "^7.9.0",
+        "misskey-js": "^2025.8.0-alpha.9",
+        "react": "^19.0.0",
+        "undici": "^7.13.0",
+        "ws": "^8.18.3",
+        "zustand": "^5.0.7"
+    }
+}

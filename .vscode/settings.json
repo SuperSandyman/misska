@@ -1,0 +1,6 @@
+{
+    "editor.formatOnSave": true,
+    "editor.defaultFormatter": "esbenp.prettier-vscode",
+    "chat.agent.maxRequests": 999,
+    "chat.todoListTool.enabled": true   
+}
