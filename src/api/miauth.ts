@@ -46,11 +46,6 @@ export const buildMiAuthUrl = (baseUrl: string, opts: MiAuthUrlOptions): string 
         callback: opts.callback,
         permission: permCsv
     });
-    // 互換性のため、permission を繰り返しキーとしても付与し、さらに permissions も付ける
-    if (opts.permission && opts.permission.length > 0) {
-        for (const p of opts.permission) q.append('permission', p);
-        for (const p of opts.permission) q.append('permissions', p);
-    }
     const qstr = q.toString();
     return `${origin}/miauth/${encodeURIComponent(opts.sessionId)}${qstr ? `?${qstr}` : ''}`;
 };

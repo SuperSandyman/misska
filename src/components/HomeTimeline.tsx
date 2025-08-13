@@ -2,6 +2,11 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Text } from 'ink';
 import TextInput from 'ink-text-input';
 import * as Misskey from 'misskey-js';
+import process from 'node:process';
+import tty from 'node:tty';
+import { URL } from 'node:url';
+import { fetch as undiciFetch } from 'undici';
+import { getThemeColor, setThemeColor } from '../config/appConfig.js';
 
 type TimelineNote = {
     id: string;
@@ -26,11 +31,96 @@ export function HomeTimeline({ baseUrl, token }: { baseUrl: string; token: strin
     const [input, setInput] = useState('');
     const [posting, setPosting] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [colorsByHost, setColorsByHost] = useState<Record<string, string>>({});
 
     const api = useMemo(() => new Misskey.api.APIClient({ origin: baseUrl, credential: token }), [baseUrl, token]);
     const streamRef = useRef<Misskey.Stream | null>(null);
     type MinimalChannel = { dispose?: () => void };
     const channelRef = useRef<MinimalChannel | null>(null);
+
+    // 代替スクリーン（全画面）
+    useEffect(() => {
+        const out = process.stdout as tty.WriteStream;
+        if (out && out.isTTY) {
+            try {
+                out.write('\x1b[?1049h'); // enable alt screen
+            } catch {
+                void 0;
+            }
+        }
+        return () => {
+            if (out && out.isTTY) {
+                try {
+                    out.write('\x1b[?1049l'); // disable alt screen
+                } catch {
+                    void 0;
+                }
+            }
+        };
+    }, []);
+
+    // テーマカラー取得（キャッシュ→meta）
+    useEffect(() => {
+        (async () => {
+            try {
+                const url = new URL(baseUrl);
+                const host = url.host;
+                const cached = getThemeColor(host);
+                if (cached) {
+                    setColorsByHost((prev) => ({ ...prev, [host]: cached }));
+                    return;
+                }
+                const meta = (await api.request('meta', { detail: false })) as { themeColor?: string };
+                if (meta?.themeColor) {
+                    setThemeColor(host, meta.themeColor);
+                    setColorsByHost((prev) => ({ ...prev, [host]: meta.themeColor! }));
+                }
+            } catch {
+                void 0;
+            }
+        })();
+    }, [api, baseUrl]);
+
+    // ノート内の各ホストのテーマカラーを（キャッシュを見つつ）補完
+    useEffect(() => {
+        const baseHost = (() => {
+            try {
+                return new URL(baseUrl).host;
+            } catch {
+                return '';
+            }
+        })();
+        const hosts = new Set<string>();
+        for (const n of notes) {
+            const host = n.user?.host ?? baseHost;
+            if (host) hosts.add(host);
+        }
+        (async () => {
+            for (const host of hosts) {
+                if (colorsByHost[host]) continue;
+                const cached = getThemeColor(host);
+                if (cached) {
+                    setColorsByHost((prev) => ({ ...prev, [host]: cached }));
+                    continue;
+                }
+                try {
+                    const res = await undiciFetch(`https://${host}/api/meta`, {
+                        method: 'POST',
+                        headers: { 'content-type': 'application/json' },
+                        body: JSON.stringify({ detail: false })
+                    });
+                    const data = (await res.json()) as { themeColor?: string };
+                    if (data?.themeColor) {
+                        setThemeColor(host, data.themeColor);
+                        setColorsByHost((prev) => ({ ...prev, [host]: data.themeColor! }));
+                    }
+                } catch {
+                    // ignore per-host failures
+                    void 0;
+                }
+            }
+        })();
+    }, [notes, baseUrl, colorsByHost]);
 
     // 初期ロード + ストリーミング購読
     useEffect(() => {
@@ -52,7 +142,7 @@ export function HomeTimeline({ baseUrl, token }: { baseUrl: string; token: strin
                 const stream = new Misskey.Stream(baseUrl, { token });
                 streamRef.current = stream;
                 const ch = stream.useChannel('homeTimeline' as unknown as keyof Misskey.Channels);
-                channelRef.current = (ch as unknown) as MinimalChannel;
+                channelRef.current = ch as unknown as MinimalChannel;
                 ch.on('note', (n: TimelineNote) => {
                     setNotes((prev) => {
                         const next = [n, ...prev.filter((x) => x.id !== n.id)];
@@ -105,7 +195,7 @@ export function HomeTimeline({ baseUrl, token }: { baseUrl: string; token: strin
         <Box flexDirection="column">
             <Box marginBottom={1}>
                 <Text>ホームタイムライン（最新100件・ライブ更新）</Text>
-                {status ? <Text>  - {status}</Text> : null}
+                {status ? <Text> - {status}</Text> : null}
             </Box>
 
             <Box flexDirection="column" marginBottom={1}>
@@ -116,7 +206,22 @@ export function HomeTimeline({ baseUrl, token }: { baseUrl: string; token: strin
                     <>
                         {notes.map((n) => (
                             <Box key={n.id} flexDirection="column" marginBottom={1}>
-                                <Text>{formatUser(n.user)}</Text>
+                                {(() => {
+                                    const baseHost = (() => {
+                                        try {
+                                            return new URL(baseUrl).host;
+                                        } catch {
+                                            return '';
+                                        }
+                                    })();
+                                    const host = n.user?.host ?? baseHost;
+                                    const c = (host && colorsByHost[host]) || undefined;
+                                    return c ? (
+                                        <Text color={c}>{formatUser(n.user)}</Text>
+                                    ) : (
+                                        <Text>{formatUser(n.user)}</Text>
+                                    );
+                                })()}
                                 <Text>• {n.text ?? '(no text)'}</Text>
                             </Box>
                         ))}
@@ -132,7 +237,7 @@ export function HomeTimeline({ baseUrl, token }: { baseUrl: string; token: strin
                     onSubmit={onSubmit}
                     placeholder="新しいノートを入力して Enter で投稿（visibility: home）"
                 />
-                {posting ? <Text>  送信中…</Text> : null}
+                {posting ? <Text> 送信中…</Text> : null}
             </Box>
 
             <Box marginTop={1}>

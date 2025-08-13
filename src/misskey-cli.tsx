@@ -7,7 +7,7 @@ import console from 'node:console';
 
 import { MisskeyClient } from './api/client.js';
 import { buildMiAuthUrl, pollMiAuthToken } from './api/miauth.js';
-import { getMe } from './api/auth.js';
+// import { getMe } from './api/auth.js';
 import { getConfig, setCurrentAccount, findAccountById, type AccountInfo } from './config/appConfig.js';
 import { saveToken, loadToken } from './config/secureStore.js';
 import HomeTimeline from './components/HomeTimeline.js';
@@ -22,19 +22,23 @@ function LoginApp({ baseUrl }: { baseUrl: string }) {
                 const url = buildMiAuthUrl(baseUrl, {
                     sessionId,
                     name: 'misska-cli',
-                    permission: ['read:account', 'write:notes']
+                    permission: ['read:account', 'read:notes', 'write:notes']
                 });
-                setMessage(`MiAuth URL を開いて承認してください:\n${url}\n承認を待機中... (キャンセル: Ctrl+C)`);
+                setMessage(
+                    `MiAuth URL を開いて承認してください:\n${url}\n要求権限: read:account, read:notes, write:notes\n承認を待機中... (キャンセル: Ctrl+C)`
+                );
 
                 const anonClient = new MisskeyClient({ baseUrl });
-                const { token } = await pollMiAuthToken(anonClient, sessionId, { timeoutMs: 2 * 60 * 1000 });
-
-                const authed = new MisskeyClient({ baseUrl, token });
-                const me = await getMe(authed);
-                const acct = me.host ? `@${me.username}@${me.host}` : `@${me.username}`;
-                // 永続化
-                const accountId = `${baseUrl}#${me.username}${me.host ? '@' + me.host : ''}`;
-                const account: AccountInfo = { id: accountId, baseUrl, username: me.username, host: me.host ?? null };
+                const { token, user } = await pollMiAuthToken(anonClient, sessionId, { timeoutMs: 2 * 60 * 1000 });
+                const acct = user.host ? `@${user.username}@${user.host}` : `@${user.username}`;
+                // 永続化（MiAuthのuser情報を利用）
+                const accountId = `${baseUrl}#${user.username}${user.host ? '@' + user.host : ''}`;
+                const account: AccountInfo = {
+                    id: accountId,
+                    baseUrl,
+                    username: user.username,
+                    host: user.host ?? null
+                };
                 setCurrentAccount(account);
                 await saveToken(accountId, token);
                 setMessage(`ログイン成功: ${acct}`);
@@ -71,15 +75,20 @@ function DefaultApp() {
                     setMessage('トークンが見つかりません。`misska login <instance-url>` を実行してください。');
                     return;
                 }
-                // トークン検証だけ行い、UIへ委譲
+                // トークン検証（/api/i -> read:accountが必要）
                 const client = new MisskeyClient({ baseUrl: acc.baseUrl, token });
+                // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+                // @ts-ignore
+                const { getMe } = await import('./api/auth.js');
                 await getMe(client);
                 setCtx({ baseUrl: acc.baseUrl, token });
                 setMessage('');
                 setReady(true);
             } catch (e) {
                 const msg = (e as Error).message || 'unknown error';
-                setMessage(`エラー: ${msg}\n再ログイン: misska login <instance-url>`);
+                setMessage(
+                    `エラー: ${msg}\n権限に read:account, read:notes, write:notes が含まれているか確認し、再ログインしてください: misska login <instance-url>`
+                );
             }
         })();
     }, []);
