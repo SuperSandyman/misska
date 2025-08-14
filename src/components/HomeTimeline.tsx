@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Box, Text } from 'ink';
+import { Box, Text, useApp, useInput } from 'ink';
 import TextInput from 'ink-text-input';
 import * as Misskey from 'misskey-js';
 import process from 'node:process';
@@ -26,12 +26,17 @@ function formatUser(u?: TimelineNote['user']): string {
 }
 
 export function HomeTimeline({ baseUrl, token }: { baseUrl: string; token: string }) {
+    const WINDOW_SIZE = 20; // TLの表示件数（簡易）
     const [notes, setNotes] = useState<TimelineNote[]>([]);
     const [status, setStatus] = useState<string>('読み込み中…');
     const [input, setInput] = useState('');
     const [posting, setPosting] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [info, setInfo] = useState<string | null>(null);
+    const [screen, setScreen] = useState<'timeline' | 'info'>('timeline');
+    const [offset, setOffset] = useState<number>(0); // 先頭からのオフセット
     const [colorsByHost, setColorsByHost] = useState<Record<string, string>>({});
+    const { exit } = useApp();
 
     const api = useMemo(() => new Misskey.api.APIClient({ origin: baseUrl, credential: token }), [baseUrl, token]);
     const streamRef = useRef<Misskey.Stream | null>(null);
@@ -135,7 +140,10 @@ export function HomeTimeline({ baseUrl, token }: { baseUrl: string; token: strin
                 if (disposed) return;
                 const msg = (e as Error).message ?? String(e);
                 setStatus('');
-                setError(`TL取得に失敗: ${msg}`);
+                setError(
+                    `TL取得に失敗: ${msg}\n` +
+                        'ネットワーク/証明書/プロキシ設定をご確認ください。必要なら /help でコマンドを確認できます。'
+                );
             }
 
             try {
@@ -149,6 +157,8 @@ export function HomeTimeline({ baseUrl, token }: { baseUrl: string; token: strin
                         if (next.length > 100) next.length = 100;
                         return next;
                     });
+                    // ビューが先頭以外にあるときは、新規ノート分だけオフセットを進めて視点を維持
+                    setOffset((prev) => (prev > 0 ? prev + 1 : 0));
                 });
                 stream.on('_disconnected_', () => setStatus('再接続中…'));
                 stream.on('_connected_', () => setStatus(''));
@@ -174,11 +184,68 @@ export function HomeTimeline({ baseUrl, token }: { baseUrl: string; token: strin
         };
     }, [api, baseUrl, token]);
 
+    // キー入力でスクロール
+    useInput((_, key) => {
+        if (screen !== 'timeline') return;
+        const maxOffset = Math.max(0, notes.length - WINDOW_SIZE);
+        if (key.upArrow) {
+            setOffset((prev) => Math.min(prev + 1, maxOffset));
+        } else if (key.downArrow) {
+            setOffset((prev) => Math.max(prev - 1, 0));
+        } else if (key.pageUp) {
+            setOffset((prev) => Math.min(prev + WINDOW_SIZE, maxOffset));
+        } else if (key.pageDown) {
+            setOffset((prev) => Math.max(prev - WINDOW_SIZE, 0));
+        }
+    });
+
     const onSubmit = async () => {
         const text = input.trim();
-        if (!text || posting) return;
+        // 情報画面表示中は、空EnterでTLに戻る
+        if (screen === 'info' && text === '') {
+            setScreen('timeline');
+            setInfo(null);
+            setInput('');
+            return;
+        }
+        if (!text) return;
+
+        // コマンド処理
+        if (text.startsWith('/')) {
+            const [cmd] = text.split(/\s+/, 1);
+            setInput('');
+            setError(null);
+            switch (cmd) {
+                case '/help': {
+                    setInfo(
+                        [
+                            '使い方:',
+                            '  • 通常のテキストでノートを投稿（visibility: home）',
+                            '  • /help  このヘルプを表示',
+                            '  • /exit  アプリを終了',
+                            '',
+                            'ヒント: 画面は↑/↓/PgUp/PgDnでスクロール可能。ヘルプを閉じるには空の入力でEnter。'
+                        ].join('\n')
+                    );
+                    setScreen('info');
+                    return;
+                }
+                case '/exit': {
+                    // Inkの終了APIを使用
+                    exit();
+                    return;
+                }
+                default: {
+                    setError(`未知のコマンド: ${cmd}（/help を参照）`);
+                    return;
+                }
+            }
+        }
+
+        if (posting) return;
         setPosting(true);
         setError(null);
+        setInfo(null);
         try {
             // 既定でホーム公開に投稿
             await api.request('notes/create', { text, visibility: 'home' });
@@ -200,48 +267,63 @@ export function HomeTimeline({ baseUrl, token }: { baseUrl: string; token: strin
 
             <Box flexDirection="column" marginBottom={1}>
                 {error ? <Text color="red">{error}</Text> : null}
-                {notes.length === 0 && !status ? (
+                {screen === 'info' ? (
+                    <Text color="cyan">{info ?? ''}</Text>
+                ) : notes.length === 0 && !status ? (
                     <Text color="gray">ノートがありません</Text>
                 ) : (
                     <>
-                        {notes.map((n) => (
-                            <Box key={n.id} flexDirection="column" marginBottom={1}>
-                                {(() => {
-                                    const baseHost = (() => {
-                                        try {
-                                            return new URL(baseUrl).host;
-                                        } catch {
-                                            return '';
-                                        }
-                                    })();
-                                    const host = n.user?.host ?? baseHost;
-                                    const c = (host && colorsByHost[host]) || undefined;
-                                    return c ? (
-                                        <Text color={c}>{formatUser(n.user)}</Text>
-                                    ) : (
-                                        <Text>{formatUser(n.user)}</Text>
-                                    );
-                                })()}
-                                <Text>• {n.text ?? '(no text)'}</Text>
-                            </Box>
-                        ))}
+                        {(() => {
+                            const maxOffset = Math.max(0, notes.length - WINDOW_SIZE);
+                            const start = Math.min(offset, maxOffset);
+                            const end = Math.min(start + WINDOW_SIZE, notes.length);
+                            const windowNotes = notes.slice(start, end);
+                            return (
+                                <>
+                                    {windowNotes.map((n) => (
+                                        <Box key={n.id} flexDirection="column" marginBottom={1}>
+                                            {(() => {
+                                                const baseHost = (() => {
+                                                    try {
+                                                        return new URL(baseUrl).host;
+                                                    } catch {
+                                                        return '';
+                                                    }
+                                                })();
+                                                const host = n.user?.host ?? baseHost;
+                                                const c = (host && colorsByHost[host]) || undefined;
+                                                return c ? (
+                                                    <Text color={c}>{formatUser(n.user)}</Text>
+                                                ) : (
+                                                    <Text>{formatUser(n.user)}</Text>
+                                                );
+                                            })()}
+                                            <Text>• {n.text ?? '(no text)'}</Text>
+                                        </Box>
+                                    ))}
+                                    <Text dimColor>
+                                        [{start + 1}-{end}/{notes.length}] ↑/↓/PgUp/PgDn でスクロール
+                                    </Text>
+                                </>
+                            );
+                        })()}
                     </>
                 )}
             </Box>
 
             <Box borderStyle="round" borderColor="cyan" paddingX={1}>
-                <Text>投稿: </Text>
+                <Text>投稿/コマンド: </Text>
                 <TextInput
                     value={input}
                     onChange={setInput}
                     onSubmit={onSubmit}
-                    placeholder="新しいノートを入力して Enter で投稿（visibility: home）"
+                    placeholder="ノート入力で投稿 / コマンド例: /help, /exit"
                 />
                 {posting ? <Text> 送信中…</Text> : null}
             </Box>
 
             <Box marginTop={1}>
-                <Text dimColor>Ctrl+C で終了</Text>
+                <Text dimColor>Ctrl+C または /exit で終了</Text>
             </Box>
         </Box>
     );

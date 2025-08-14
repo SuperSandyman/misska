@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import process from 'node:process';
 import console from 'node:console';
 
-import { MisskeyClient } from './api/client.js';
+import { MisskeyClient, normalizeBaseUrl } from './api/client.js';
 import { buildMiAuthUrl, pollMiAuthToken } from './api/miauth.js';
 // import { getMe } from './api/auth.js';
 import { getConfig, setCurrentAccount, findAccountById, type AccountInfo } from './config/appConfig.js';
@@ -28,14 +28,15 @@ function LoginApp({ baseUrl }: { baseUrl: string }) {
                     `MiAuth URL を開いて承認してください:\n${url}\n要求権限: read:account, read:notes, write:notes\n承認を待機中... (キャンセル: Ctrl+C)`
                 );
 
-                const anonClient = new MisskeyClient({ baseUrl });
+                const normalized = normalizeBaseUrl(baseUrl);
+                const anonClient = new MisskeyClient({ baseUrl: normalized });
                 const { token, user } = await pollMiAuthToken(anonClient, sessionId, { timeoutMs: 2 * 60 * 1000 });
                 const acct = user.host ? `@${user.username}@${user.host}` : `@${user.username}`;
                 // 永続化（MiAuthのuser情報を利用）
-                const accountId = `${baseUrl}#${user.username}${user.host ? '@' + user.host : ''}`;
+                const accountId = `${normalized}#${user.username}${user.host ? '@' + user.host : ''}`;
                 const account: AccountInfo = {
                     id: accountId,
-                    baseUrl,
+                    baseUrl: normalized,
                     username: user.username,
                     host: user.host ?? null
                 };
@@ -76,19 +77,36 @@ function DefaultApp() {
                     return;
                 }
                 // トークン検証（/api/i -> read:accountが必要）
-                const client = new MisskeyClient({ baseUrl: acc.baseUrl, token });
+                const client = new MisskeyClient({ baseUrl: normalizeBaseUrl(acc.baseUrl), token });
                 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
                 // @ts-ignore
                 const { getMe } = await import('./api/auth.js');
-                await getMe(client);
-                setCtx({ baseUrl: acc.baseUrl, token });
-                setMessage('');
-                setReady(true);
+                try {
+                    await getMe(client);
+                    setCtx({ baseUrl: acc.baseUrl, token });
+                    setMessage('');
+                    setReady(true);
+                } catch (e) {
+                    const em = (e as Error).message || '';
+                    // ネットワーク層の失敗は警告のみにして続行（後段で UI 側が再試行/表示）
+                    if (em.startsWith('Network fetch failed:')) {
+                        setCtx({ baseUrl: acc.baseUrl, token });
+                        setMessage(
+                            '警告: 起動時のトークン検証に失敗しました（ネットワーク）。後続の画面で再試行します。' +
+                                '\n詳細: ' +
+                                em
+                        );
+                        setReady(true);
+                    } else {
+                        throw e;
+                    }
+                }
             } catch (e) {
                 const msg = (e as Error).message || 'unknown error';
-                setMessage(
-                    `エラー: ${msg}\n権限に read:account, read:notes, write:notes が含まれているか確認し、再ログインしてください: misska login <instance-url>`
-                );
+                const hint =
+                    'URL が正しいか（例: https://example.com）、ネットワーク到達性、プロキシ設定、証明書エラーをご確認ください。' +
+                    '\n必要なら再ログイン: misska login <instance-url>';
+                setMessage(`エラー: ${msg}\n${hint}`);
             }
         })();
     }, []);

@@ -1,4 +1,4 @@
-import { MisskeyClient } from './client.js';
+import { MisskeyClient, normalizeBaseUrl } from './client.js';
 import { URLSearchParams } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 
@@ -38,7 +38,7 @@ const buildQuery = (params: Record<string, string | undefined>): URLSearchParams
 };
 
 export const buildMiAuthUrl = (baseUrl: string, opts: MiAuthUrlOptions): string => {
-    const origin = baseUrl.replace(/\/?$/, '');
+    const origin = normalizeBaseUrl(baseUrl);
     const permCsv = opts.permission && opts.permission.length > 0 ? opts.permission.join(',') : undefined;
     const q = buildQuery({
         name: opts.name,
