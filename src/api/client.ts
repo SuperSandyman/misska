@@ -87,4 +87,17 @@ export class MisskeyClient {
 
         return data as T;
     }
+
+    /**
+     * Debug helper: fetch the latest note (notes/timeline limit=1)
+     * Returns the first note or null if none.
+     */
+    async fetchLatestNote(): Promise<unknown | null> {
+        try {
+            const res = await this.post<unknown[]>('notes/timeline', { limit: 1 });
+            return Array.isArray(res) && res.length > 0 ? res[0] : null;
+        } catch {
+            return null;
+        }
+    }
 }
