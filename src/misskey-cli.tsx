@@ -97,6 +97,13 @@ function DefaultApp() {
                                 em
                         );
                         setReady(true);
+                    } else if (em.startsWith('Misskey API error: PERMISSION_DENIED')) {
+                        setMessage(
+                            'エラー: 権限不足です（read:account 等）。' +
+                                '\nURL とトークンの権限を確認してください。必要なら再ログイン: misska login <instance-url>'
+                        );
+                        // 続行せず待機
+                        setReady(false);
                     } else {
                         throw e;
                     }

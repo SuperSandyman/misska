@@ -79,7 +79,15 @@ export class MisskeyClient {
             const errBody = isJson ? (data as ApiErrorBody) : undefined;
             const code = errBody?.error?.code ?? `HTTP_${res.status}`;
             const message = errBody?.error?.message ?? (typeof data === 'string' ? data : 'Request failed');
-            const error = new Error(`Misskey API error: ${code}: ${message}`);
+            const baseMsg = `Misskey API error: ${code}: ${message}`;
+            // 追加ヒント: 権限不足時は endpoint を示して再ログインを促す
+            const permHint =
+                code === 'PERMISSION_DENIED'
+                    ? `\nHint: endpoint=/api/${endpoint} に必要な権限が不足しています。` +
+                      `\n例) TL取得: read:notes, 投稿: write:notes, 自分情報: read:account` +
+                      `\n必要なら再ログイン: misska login <instance-url>`
+                    : '';
+            const error = new Error(`${baseMsg}${permHint}`);
             // @ts-expect-error attach fields for diagnostics
             error.statusCode = res.status;
             throw error;

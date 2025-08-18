@@ -5,6 +5,7 @@ import * as Misskey from 'misskey-js';
 import process from 'node:process';
 import tty from 'node:tty';
 import { URL } from 'node:url';
+import { setTimeout as nodeSetTimeout } from 'node:timers';
 import { fetch as undiciFetch } from 'undici';
 import { getThemeColor, setThemeColor } from '../config/appConfig.js';
 import { MisskeyClient } from '../api/client.js';
@@ -46,9 +47,12 @@ export function HomeTimeline({ baseUrl, token }: { baseUrl: string; token: strin
     const [posting, setPosting] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [info, setInfo] = useState<string | null>(null);
-    // 入力欄やステータス行、エラー表示などを考慮して下部の確保行数を動的に算出
-    const bottomReserved = 3 + (error ? 1 : 0) + (info ? 1 : 0);
+    // 画面モード: タイムライン/情報オーバーレイ
     const [screen, setScreen] = useState<'timeline' | 'info'>('timeline');
+    // 操作モード: タイムライン/コマンド/投稿
+    const [uiMode, setUiMode] = useState<'timeline' | 'command' | 'post'>('timeline');
+    // 下部固定領域: ステータス1行 + （入力ボックス表示時は枠含め概算3行） + エラー行（上部表示だが簡易に減算）
+    const bottomReserved = 1 + (uiMode === 'timeline' ? 0 : 3) + (error ? 1 : 0);
     const [offset, setOffset] = useState<number>(0); // 先頭からのオフセット
     const [loadingMore, setLoadingMore] = useState<boolean>(false); // 追加読み込み中
     const [hasMore, setHasMore] = useState<boolean>(true); // さらに読み込み可能か
@@ -64,20 +68,19 @@ export function HomeTimeline({ baseUrl, token }: { baseUrl: string; token: strin
 
     // 代替スクリーン（全画面）
     useEffect(() => {
-    // notesRef を更新
-    notesRef.current = notes;
-
         const out = process.stdout as tty.WriteStream;
         if (out && out.isTTY) {
             try {
                 out.write('\x1b[?1049h'); // enable alt screen
+                // 画面をクリアしてカーソルを左上へ（残像で先頭行が見切れないように）
+                out.write('\x1b[2J\x1b[H');
             } catch {
                 void 0;
             }
         }
         // 端末サイズ変化への追従
         const onResize = () => {
-                const rows = out && out.rows ? out.rows : 24;
+            const rows = out && out.rows ? out.rows : 24;
             setTermRows(rows);
             // オフセットを調整して、リサイズ後に表示が完全に空にならないようにする
             setOffset((prev) => {
@@ -122,6 +125,11 @@ export function HomeTimeline({ baseUrl, token }: { baseUrl: string; token: strin
             }
         };
     }, []);
+
+    // notes が変化したら参照を更新（リサイズ時の計測で最新配列を使う）
+    useEffect(() => {
+        notesRef.current = notes;
+    }, [notes]);
 
     // テーマカラー取得（キャッシュ→meta）
     useEffect(() => {
@@ -323,118 +331,203 @@ export function HomeTimeline({ baseUrl, token }: { baseUrl: string; token: strin
     };
     const currentVisibleCount = visibleCountForOffset(offset);
 
-    // キー入力でスクロール
-    useInput((_, key) => {
-        if (screen !== 'timeline') return;
+    // gg 検出用
+    const gAwaitRef = useRef<number | null>(null);
+    // キー入力で操作
+    useInput((inputChar, key) => {
+        // 情報画面は Esc/Enter で閉じる
+        if (screen === 'info') {
+            if (key.escape || key.return) {
+                setScreen('timeline');
+            }
+            // info表示中は他の操作は無効
+            return;
+        }
+
+        // コマンド/投稿モード中は Esc でキャンセルしてTLへ戻る
+        if (uiMode !== 'timeline') {
+            if (key.escape) {
+                setUiMode('timeline');
+                setInput('');
+            }
+            return; // 入力自体は TextInput に委譲
+        }
+
+        // ここから TL モードのキー処理
         const maxOffset = Math.max(0, notes.length - 1);
-        if (key.upArrow) {
-            setOffset((prev) => Math.max(prev - 1, 0));
-        } else if (key.downArrow) {
+
+        // j/k
+        if (inputChar === 'j') {
             const newOffset = Math.min(offset + 1, maxOffset);
             setOffset(newOffset);
             const reachEnd = newOffset + visibleCountForOffset(newOffset) >= notes.length - 5;
             if (reachEnd && hasMore && !loadingMore) loadMoreNotes();
-        } else if (key.pageUp) {
+            return;
+        }
+        if (inputChar === 'k') {
+            setOffset((prev) => Math.max(prev - 1, 0));
+            return;
+        }
+
+        // 矢印/Pageキーもサポート継続
+        if (key.upArrow) {
+            setOffset((prev) => Math.max(prev - 1, 0));
+            return;
+        }
+        if (key.downArrow) {
+            const newOffset = Math.min(offset + 1, maxOffset);
+            setOffset(newOffset);
+            const reachEnd = newOffset + visibleCountForOffset(newOffset) >= notes.length - 5;
+            if (reachEnd && hasMore && !loadingMore) loadMoreNotes();
+            return;
+        }
+
+        // Ctrl-f: 一画面上（offset を減らす）
+        if (key.ctrl && inputChar === 'f') {
             setOffset((prev) => Math.max(prev - Math.max(1, currentVisibleCount), 0));
-        } else if (key.pageDown) {
+            return;
+        }
+        // Ctrl-b: 一画面下（offset を増やす）
+        if (key.ctrl && inputChar === 'b') {
             const step = Math.max(1, currentVisibleCount);
             const newOffset = Math.min(offset + step, maxOffset);
             setOffset(newOffset);
             const reachEnd = newOffset + visibleCountForOffset(newOffset) >= notes.length - 5;
             if (reachEnd && hasMore && !loadingMore) loadMoreNotes();
+            return;
+        }
+        // PageUp/PageDown も残す
+        if (key.pageUp) {
+            setOffset((prev) => Math.max(prev - Math.max(1, currentVisibleCount), 0));
+            return;
+        }
+        if (key.pageDown) {
+            const step = Math.max(1, currentVisibleCount);
+            const newOffset = Math.min(offset + step, maxOffset);
+            setOffset(newOffset);
+            const reachEnd = newOffset + visibleCountForOffset(newOffset) >= notes.length - 5;
+            if (reachEnd && hasMore && !loadingMore) loadMoreNotes();
+            return;
+        }
+
+        // gg (ダブル g)
+        if (inputChar === 'g' && !key.ctrl && !key.meta) {
+            const now = Date.now();
+            const last = gAwaitRef.current;
+            if (last && now - last < 600) {
+                setOffset(0);
+                gAwaitRef.current = null;
+            } else {
+                gAwaitRef.current = now;
+                nodeSetTimeout(() => {
+                    const l = gAwaitRef.current;
+                    if (l && Date.now() - l >= 600) gAwaitRef.current = null;
+                }, 650);
+            }
+            return;
+        }
+
+        // '/' でコマンドモードへ
+        if (inputChar === '/') {
+            setUiMode('command');
+            setInput('/');
+            return;
         }
     });
 
     const onSubmit = async () => {
         const text = input.trim();
-        // 情報画面表示中は、空EnterでTLに戻る
-        if (screen === 'info' && text === '') {
-            setScreen('timeline');
-            setInfo(null);
-            setInput('');
-            return;
-        }
-        if (!text) return;
-
-        // コマンド処理
-        if (text.startsWith('/')) {
+        // command モード
+        if (uiMode === 'command') {
+            if (!text) {
+                setUiMode('timeline');
+                setInput('');
+                return;
+            }
             const [cmd] = text.split(/\s+/, 1);
             setInput('');
             setError(null);
-            switch (cmd) {
-                case '/help': {
-                    setInfo(
-                        [
-                            '使い方:',
-                            '  • 通常のテキストでノートを投稿（visibility: home）',
-                            '  • /help     このヘルプを表示',
-                            '  • /refresh  最新データを強制取得',
-                            '  • /latest   最新ノート1件をJSON表示',
-                            '  • /exit     アプリを終了',
-                            '',
-                            'ヒント: 画面は↑/↓/PgUp/PgDnでスクロール可能。ヘルプを閉じるには空の入力でEnter。'
-                        ].join('\n')
-                    );
-                    setScreen('info');
-                    return;
-                }
-                case '/refresh': {
-                    setError(null);
-                    setInfo('最新データを取得中...');
-                    setScreen('info');
-                    try {
-                        const fresh = await httpClient.post<TimelineNote[]>('notes/timeline', { limit: 50 });
-                        const sortedFresh = sortNotesByDate(fresh);
-                        setNotes(sortedFresh);
-                        setOffset(0);
-                        setInfo(`最新データを取得しました (${fresh.length}件)`);
-                        // 取得完了後は自動でTLに戻る
-                        setScreen('timeline');
-                        setInfo(null);
-                    } catch (e) {
-                        setInfo(`取得に失敗: ${(e as Error).message}`);
-                    }
-                    return;
-                }
-                case '/latest': {
-                    setError(null);
-                    setInfo('取得中...');
-                    setScreen('info');
-                    try {
-                        const latest = await httpClient.fetchLatestNote();
-                        setInfo(JSON.stringify(latest, null, 2) ?? 'null');
-                    } catch (e) {
-                        setInfo(`取得に失敗: ${(e as Error).message}`);
-                    }
-                    return;
-                }
-                case '/exit': {
-                    // Inkの終了APIを使用
-                    exit();
-                    return;
-                }
-                default: {
-                    setError(`未知のコマンド: ${cmd}（/help を参照）`);
-                    return;
-                }
+            if (cmd === '/post') {
+                setUiMode('post');
+                return;
             }
+            if (cmd === '/help') {
+                setInfo(
+                    [
+                        '使い方:',
+                        '  • /post     投稿モードに入る',
+                        '  • /refresh  最新データを強制取得',
+                        '  • /latest   最新ノート1件をJSON表示',
+                        '  • /exit     アプリを終了',
+                        '',
+                        '操作: j/k, Ctrl-f/Ctrl-b, gg, / でコマンドモード'
+                    ].join('\n')
+                );
+                setScreen('info');
+                setUiMode('timeline');
+                return;
+            }
+            if (cmd === '/refresh') {
+                setInfo('最新データを取得中...');
+                setScreen('info');
+                try {
+                    const fresh = await httpClient.post<TimelineNote[]>('notes/timeline', { limit: 50 });
+                    const sortedFresh = sortNotesByDate(fresh);
+                    setNotes(sortedFresh);
+                    setOffset(0);
+                    setInfo(`最新データを取得しました (${fresh.length}件)`);
+                    setScreen('timeline');
+                    setInfo(null);
+                } catch (e) {
+                    setInfo(`取得に失敗: ${(e as Error).message}`);
+                }
+                setUiMode('timeline');
+                return;
+            }
+            if (cmd === '/latest') {
+                setInfo('取得中...');
+                setScreen('info');
+                try {
+                    const latest = await httpClient.fetchLatestNote();
+                    setInfo(JSON.stringify(latest, null, 2) ?? 'null');
+                } catch (e) {
+                    setInfo(`取得に失敗: ${(e as Error).message}`);
+                }
+                setUiMode('timeline');
+                return;
+            }
+            if (cmd === '/exit') {
+                exit();
+                return;
+            }
+            setError(`未知のコマンド: ${cmd}（/help を参照）`);
+            setUiMode('timeline');
+            return;
         }
 
-        if (posting) return;
-        setPosting(true);
-        setError(null);
-        setInfo(null);
-        try {
-            // 既定でホーム公開に投稿
-            await api.request('notes/create', { text, visibility: 'home' });
-            setInput('');
-            // 投稿成功時：先頭表示に戻る（自分の投稿を確認しやすくする）
-            setOffset(0);
-        } catch (e) {
-            const msg = (e as Error).message ?? String(e);
-            setError(`投稿に失敗: ${msg}`);
-        } finally {
-            setPosting(false);
+        // post モード
+        if (uiMode === 'post') {
+            if (!text) {
+                setUiMode('timeline');
+                setInput('');
+                return;
+            }
+            if (posting) return;
+            setPosting(true);
+            setError(null);
+            setInfo(null);
+            try {
+                await api.request('notes/create', { text, visibility: 'home' });
+                setInput('');
+                setOffset(0);
+            } catch (e) {
+                const msg = (e as Error).message ?? String(e);
+                setError(`投稿に失敗: ${msg}`);
+            } finally {
+                setPosting(false);
+                setUiMode('timeline');
+            }
+            return;
         }
     };
 
@@ -474,7 +567,45 @@ export function HomeTimeline({ baseUrl, token }: { baseUrl: string; token: strin
                                 <Text key={`${n.id}-h`}>{formatUser(n.user)}</Text>
                             );
                             const lines = formatNoteText(n.text).split('\n');
-                            const need = 1 + lines.length + 1;
+
+                            const isFirst = i === offset && used === 0;
+                            if (isFirst) {
+                                // 先頭ノートはヘッダだけでも必ず表示し、本文は入る範囲だけ描画
+                                if (availableRows <= 0) break;
+                                // 端末やペインの描画残像対策として、最初に空白行を一つ入れてからヘッダを描画
+                                // （空行が描画領域を消費してしまうのを避けるため、余裕がある場合のみ）
+                                if (used === 0 && availableRows >= 2) {
+                                    elems.push(<Text key={`${n.id}-top-pad`}> </Text>);
+                                    used += 1;
+                                }
+                                elems.push(header);
+                                used += 1; // header
+
+                                const remainAfterHeader = availableRows - used;
+                                if (remainAfterHeader <= 0) break;
+
+                                const bodyFit = Math.min(lines.length, remainAfterHeader);
+                                for (let j = 0; j < bodyFit; j += 1) {
+                                    const line = lines[j];
+                                    elems.push(
+                                        <Text key={`${n.id}-b-${j}`}>
+                                            {j === 0 ? '• ' : '  '}
+                                            {line}
+                                        </Text>
+                                    );
+                                }
+                                used += bodyFit; // body
+
+                                // 本文をすべて描画でき、まだ1行以上余裕がある場合のみ空行（spacer）を入れる
+                                if (bodyFit === lines.length && used + 1 <= availableRows) {
+                                    elems.push(<Text key={`${n.id}-sp`}> </Text>);
+                                    used += 1;
+                                }
+                                continue;
+                            }
+
+                            // 2件目以降は従来通り「ヘッダ+本文+空行」丸ごと入る場合のみ描画
+                            const need = 1 + lines.length + 1; // header + body + spacer
                             if (used + need > availableRows) break;
                             elems.push(
                                 <Box key={n.id} flexDirection="column" marginBottom={1}>
@@ -492,33 +623,42 @@ export function HomeTimeline({ baseUrl, token }: { baseUrl: string; token: strin
                         // filler を追加して常に availableRows 行分を占有する
                         const remaining = Math.max(0, availableRows - used);
                         for (let r = 0; r < remaining; r += 1) {
-                            elems.push(
-                                <Text key={`_filler_${r}`}>
-                                    {' '}
-                                </Text>
-                            );
+                            elems.push(<Text key={`_filler_${r}`}> </Text>);
                         }
                         return <>{elems}</>;
                     })()
                 )}
             </Box>
 
-            <Box borderStyle="round" borderColor="cyan" paddingX={1}>
-                <Text>投稿/コマンド: </Text>
-                <TextInput
-                    value={input}
-                    onChange={setInput}
-                    onSubmit={onSubmit}
-                    placeholder="ノート入力で投稿 / コマンド例: /help, /exit"
-                />
-                {posting ? <Text> 送信中…</Text> : null}
-            </Box>
+            {uiMode === 'command' ? (
+                <Box borderStyle="round" borderColor="cyan" paddingX={1}>
+                    <Text>コマンド: </Text>
+                    <TextInput
+                        value={input}
+                        onChange={setInput}
+                        onSubmit={onSubmit}
+                        placeholder="/post, /help, /exit, /refresh"
+                    />
+                </Box>
+            ) : null}
+            {uiMode === 'post' ? (
+                <Box borderStyle="round" borderColor="green" paddingX={1}>
+                    <Text>投稿: </Text>
+                    <TextInput
+                        value={input}
+                        onChange={setInput}
+                        onSubmit={onSubmit}
+                        placeholder="Enterで投稿 / Escでキャンセル"
+                    />
+                    {posting ? <Text> 送信中…</Text> : null}
+                </Box>
+            ) : null}
 
             <Box>
                 {status ? (
                     <Text dimColor>{status}</Text>
                 ) : (
-                    <Text dimColor>↑/↓/PgUp/PgDn でスクロール / Ctrl+C または /exit で終了</Text>
+                    <Text dimColor>j/k, Ctrl-f/Ctrl-b, gg, / でコマンド / Ctrl+C で終了</Text>
                 )}
             </Box>
         </Box>
