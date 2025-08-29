@@ -654,13 +654,7 @@ export function HomeTimeline({ baseUrl, token }: { baseUrl: string; token: strin
                 </Box>
             ) : null}
 
-            <Box>
-                {status ? (
-                    <Text dimColor>{status}</Text>
-                ) : (
-                    <Text dimColor>j/k, Ctrl-f/Ctrl-b, gg, / でコマンド / Ctrl+C で終了</Text>
-                )}
-            </Box>
+            <Box>{status ? <Text dimColor>{status}</Text> : <Text dimColor>/ でコマンド / Ctrl+C で終了</Text>}</Box>
         </Box>
     );
 }
