@@ -22,10 +22,10 @@ function LoginApp({ baseUrl }: { baseUrl: string }) {
                 const url = buildMiAuthUrl(baseUrl, {
                     sessionId,
                     name: 'misska-cli',
-                    permission: ['read:account', 'read:notes', 'write:notes']
+                    permission: ['read:account', 'read:notes', 'write:notes', 'write:reactions']
                 });
                 setMessage(
-                    `MiAuth URL を開いて承認してください:\n${url}\n要求権限: read:account, read:notes, write:notes\n承認を待機中... (キャンセル: Ctrl+C)`
+                    `MiAuth URL を開いて承認してください:\n${url}\n要求権限: read:account, read:notes, write:notes, write:reactions\n承認を待機中... (キャンセル: Ctrl+C)`
                 );
 
                 const normalized = normalizeBaseUrl(baseUrl);

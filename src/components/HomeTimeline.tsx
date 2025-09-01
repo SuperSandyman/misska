@@ -49,11 +49,15 @@ export function HomeTimeline({ baseUrl, token }: { baseUrl: string; token: strin
     const [info, setInfo] = useState<string | null>(null);
     // 画面モード: タイムライン/情報オーバーレイ
     const [screen, setScreen] = useState<'timeline' | 'info'>('timeline');
-    // 操作モード: タイムライン/コマンド/投稿
-    const [uiMode, setUiMode] = useState<'timeline' | 'command' | 'post'>('timeline');
+    // 操作モード: タイムライン/コマンド/投稿/リアクション
+    const [uiMode, setUiMode] = useState<'timeline' | 'command' | 'post' | 'reaction'>('timeline');
     // 下部固定領域: ステータス1行 + （入力ボックス表示時は枠含め概算3行） + エラー行（上部表示だが簡易に減算）
     const bottomReserved = 1 + (uiMode === 'timeline' ? 0 : 3) + (error ? 1 : 0);
     const [offset, setOffset] = useState<number>(0); // 先頭からのオフセット
+    const offsetRef = useRef<number>(0);
+    useEffect(() => {
+        offsetRef.current = offset;
+    }, [offset]);
     const [loadingMore, setLoadingMore] = useState<boolean>(false); // 追加読み込み中
     const [hasMore, setHasMore] = useState<boolean>(true); // さらに読み込み可能か
     const [colorsByHost, setColorsByHost] = useState<Record<string, string>>({});
@@ -237,18 +241,29 @@ export function HomeTimeline({ baseUrl, token }: { baseUrl: string; token: strin
                 channelRef.current = ch as unknown as MinimalChannel;
 
                 ch.on('note', (n: TimelineNote) => {
-                    setNotes((prev) => {
-                        // 新しいノートを追加してソート
-                        const withoutDuplicate = prev.filter((x) => x.id !== n.id);
-                        const withNew = [n, ...withoutDuplicate];
-                        const sorted = sortNotesByDate(withNew);
-                        if (sorted.length > 100) sorted.length = 100;
-                        return sorted;
-                    });
-                    // 新規ノート追加時：先頭表示中（offset=0）なら新しいノートが自動表示される
-                    // スクロール中（offset>0）なら相対位置を維持するためoffsetを+1
-                    // ただし、意図しないオフセットの蓄積を防ぐため、基本は0にリセット
-                    setOffset(0);
+                    // 直前の可視先頭ノートをアンカーとして保持
+                    const prev = notesRef.current;
+                    const currentOffset = offsetRef.current;
+                    const anchorId = prev[currentOffset]?.id ?? null;
+
+                    // 新規ノート追加 & ソート
+                    const withoutDuplicate = prev.filter((x) => x.id !== n.id);
+                    const withNew = [n, ...withoutDuplicate];
+                    const sorted = sortNotesByDate(withNew);
+                    if (sorted.length > 100) sorted.length = 100;
+                    setNotes(sorted);
+
+                    // オフセット調整
+                    if (currentOffset > 0 && anchorId) {
+                        const newIdx = sorted.findIndex((x) => x.id === anchorId);
+                        if (newIdx >= 0) {
+                            setOffset(newIdx);
+                        }
+                        // 見つからない場合はそのまま（自然に先頭へ近づく）
+                    } else {
+                        // 先頭表示中は最新を見せる
+                        setOffset(0);
+                    }
                 });
                 stream.on('_disconnected_', () => {
                     setStatus('再接続中…');
@@ -444,11 +459,32 @@ export function HomeTimeline({ baseUrl, token }: { baseUrl: string; token: strin
                 setInput('');
                 return;
             }
-            const [cmd] = text.split(/\s+/, 1);
+            const parts = text.split(/\s+/);
+            const cmd = parts[0] ?? '';
             setInput('');
             setError(null);
             if (cmd === '/post') {
                 setUiMode('post');
+                return;
+            }
+            if (cmd === '/reaction' || cmd === '/react') {
+                const reactionArg = parts.slice(1).join(' ').trim();
+                if (reactionArg) {
+                    // 先頭表示ノートに即時リアクション
+                    try {
+                        const target = notes[offset];
+                        if (!target) throw new Error('リアクション対象のノートがありません');
+                        await api.request('notes/reactions/create', { noteId: target.id, reaction: reactionArg });
+                        setStatus(`リアクション送信: ${reactionArg}`);
+                    } catch (e) {
+                        const msg = (e as Error).message ?? String(e);
+                        setError(`リアクションに失敗: ${msg}`);
+                    }
+                    setUiMode('timeline');
+                } else {
+                    // 入力モードへ切り替え
+                    setUiMode('reaction');
+                }
                 return;
             }
             if (cmd === '/help') {
@@ -456,6 +492,7 @@ export function HomeTimeline({ baseUrl, token }: { baseUrl: string; token: strin
                     [
                         '使い方:',
                         '  • /post     投稿モードに入る',
+                        '  • /reaction [絵文字]  先頭ノートにリアクション（例: /reaction ❤️ や /reaction :kusa:）',
                         '  • /refresh  最新データを強制取得',
                         '  • /latest   最新ノート1件をJSON表示',
                         '  • /exit     アプリを終了',
@@ -525,6 +562,28 @@ export function HomeTimeline({ baseUrl, token }: { baseUrl: string; token: strin
                 setError(`投稿に失敗: ${msg}`);
             } finally {
                 setPosting(false);
+                setUiMode('timeline');
+            }
+            return;
+        }
+
+        // reaction モード
+        if (uiMode === 'reaction') {
+            if (!text) {
+                setUiMode('timeline');
+                setInput('');
+                return;
+            }
+            try {
+                const target = notes[offset];
+                if (!target) throw new Error('リアクション対象のノートがありません');
+                await api.request('notes/reactions/create', { noteId: target.id, reaction: text });
+                setStatus(`リアクション送信: ${text}`);
+                setInput('');
+            } catch (e) {
+                const msg = (e as Error).message ?? String(e);
+                setError(`リアクションに失敗: ${msg}`);
+            } finally {
                 setUiMode('timeline');
             }
             return;
@@ -637,7 +696,7 @@ export function HomeTimeline({ baseUrl, token }: { baseUrl: string; token: strin
                         value={input}
                         onChange={setInput}
                         onSubmit={onSubmit}
-                        placeholder="/post, /help, /exit, /refresh"
+                        placeholder="/post, /reaction, /help, /exit, /refresh"
                     />
                 </Box>
             ) : null}
@@ -651,6 +710,17 @@ export function HomeTimeline({ baseUrl, token }: { baseUrl: string; token: strin
                         placeholder="Enterで投稿 / Escでキャンセル"
                     />
                     {posting ? <Text> 送信中…</Text> : null}
+                </Box>
+            ) : null}
+            {uiMode === 'reaction' ? (
+                <Box borderStyle="round" borderColor="yellow" paddingX={1}>
+                    <Text>リアクション: </Text>
+                    <TextInput
+                        value={input}
+                        onChange={setInput}
+                        onSubmit={onSubmit}
+                        placeholder=":emoji: や 絵文字を入力 / Escでキャンセル"
+                    />
                 </Box>
             ) : null}
 
