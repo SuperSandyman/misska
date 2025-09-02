@@ -51,6 +51,8 @@ export function HomeTimeline({ baseUrl, token }: { baseUrl: string; token: strin
     const [screen, setScreen] = useState<'timeline' | 'info'>('timeline');
     // 操作モード: タイムライン/コマンド/投稿/リアクション
     const [uiMode, setUiMode] = useState<'timeline' | 'command' | 'post' | 'reaction'>('timeline');
+    // タイムライン種別
+    const [tlType, setTlType] = useState<'home' | 'local' | 'social' | 'global'>('home');
     // 下部固定領域: ステータス1行 + （入力ボックス表示時は枠含め概算3行） + エラー行（上部表示だが簡易に減算）
     const bottomReserved = 1 + (uiMode === 'timeline' ? 0 : 3) + (error ? 1 : 0);
     const [offset, setOffset] = useState<number>(0); // 先頭からのオフセット
@@ -207,12 +209,48 @@ export function HomeTimeline({ baseUrl, token }: { baseUrl: string; token: strin
         });
     };
 
+    const endpointForType = (t: typeof tlType): string => {
+        switch (t) {
+            case 'home':
+                return 'notes/timeline';
+            case 'local':
+                return 'notes/local-timeline';
+            case 'social':
+                return 'notes/hybrid-timeline';
+            case 'global':
+                return 'notes/global-timeline';
+        }
+    };
+    const channelForType = (t: typeof tlType): string => {
+        switch (t) {
+            case 'home':
+                return 'homeTimeline';
+            case 'local':
+                return 'localTimeline';
+            case 'social':
+                return 'hybridTimeline';
+            case 'global':
+                return 'globalTimeline';
+        }
+    };
+    const fetchTimeline = async (limit: number, untilId?: string): Promise<TimelineNote[]> => {
+        const ep = endpointForType(tlType);
+        const body: Record<string, unknown> = { limit };
+        if (untilId) body.untilId = untilId;
+        return httpClient.post<TimelineNote[]>(ep, body);
+    };
+
     // 初期ロード + ストリーミング購読
     useEffect(() => {
         let disposed = false;
         (async () => {
             try {
-                const initial = await httpClient.post<TimelineNote[]>('notes/timeline', { limit: 50 });
+                // 切り替え時は状態を初期化
+                setNotes([]);
+                setHasMore(true);
+                setOffset(0);
+                setStatus('読み込み中…');
+                const initial = await fetchTimeline(50);
                 if (disposed) return;
                 // 取得したノートを確実に新しい順でソート
                 const sortedInitial = sortNotesByDate(initial);
@@ -237,7 +275,9 @@ export function HomeTimeline({ baseUrl, token }: { baseUrl: string; token: strin
             try {
                 const stream = new Misskey.Stream(baseUrl, { token });
                 streamRef.current = stream;
-                const ch = stream.useChannel('homeTimeline' as unknown as keyof Misskey.Channels);
+                const chName = channelForType(tlType);
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                const ch = (stream as any).useChannel(chName);
                 channelRef.current = ch as unknown as MinimalChannel;
 
                 ch.on('note', (n: TimelineNote) => {
@@ -294,7 +334,7 @@ export function HomeTimeline({ baseUrl, token }: { baseUrl: string; token: strin
                 // ignore cleanup error
             }
         };
-    }, [api, baseUrl, token]);
+    }, [api, baseUrl, token, tlType]);
 
     // 追加読み込み関数
     const loadMoreNotes = async () => {
@@ -303,10 +343,7 @@ export function HomeTimeline({ baseUrl, token }: { baseUrl: string; token: strin
         try {
             const oldestNote = notes[notes.length - 1];
             const untilId = oldestNote?.id;
-            const additional = await httpClient.post<TimelineNote[]>('notes/timeline', {
-                limit: 30,
-                untilId
-            });
+            const additional = await fetchTimeline(30, untilId);
 
             if (additional.length === 0) {
                 setHasMore(false);
@@ -370,6 +407,30 @@ export function HomeTimeline({ baseUrl, token }: { baseUrl: string; token: strin
 
         // ここから TL モードのキー処理
         const maxOffset = Math.max(0, notes.length - 1);
+
+        // 数字キーでタイムライン切替（1:Home, 2:Local, 3:Social, 4:Global）
+        if (!key.ctrl && !key.meta && !key.shift) {
+            if (inputChar === '1') {
+                setTlType('home');
+                setStatus('ホームTL');
+                return;
+            }
+            if (inputChar === '2') {
+                setTlType('local');
+                setStatus('ローカルTL');
+                return;
+            }
+            if (inputChar === '3') {
+                setTlType('social');
+                setStatus('ソーシャルTL');
+                return;
+            }
+            if (inputChar === '4') {
+                setTlType('global');
+                setStatus('グローバルTL');
+                return;
+            }
+        }
 
         // j/k
         if (inputChar === 'j') {
@@ -497,7 +558,7 @@ export function HomeTimeline({ baseUrl, token }: { baseUrl: string; token: strin
                         '  • /latest   最新ノート1件をJSON表示',
                         '  • /exit     アプリを終了',
                         '',
-                        '操作: j/k, Ctrl-f/Ctrl-b, gg, / でコマンドモード'
+                        '操作: 1/2/3/4でTL切替, j/k, Ctrl-f/Ctrl-b, gg, / でコマンドモード'
                     ].join('\n')
                 );
                 setScreen('info');
@@ -508,7 +569,7 @@ export function HomeTimeline({ baseUrl, token }: { baseUrl: string; token: strin
                 setInfo('最新データを取得中...');
                 setScreen('info');
                 try {
-                    const fresh = await httpClient.post<TimelineNote[]>('notes/timeline', { limit: 50 });
+                    const fresh = await fetchTimeline(50);
                     const sortedFresh = sortNotesByDate(fresh);
                     setNotes(sortedFresh);
                     setOffset(0);
@@ -724,7 +785,13 @@ export function HomeTimeline({ baseUrl, token }: { baseUrl: string; token: strin
                 </Box>
             ) : null}
 
-            <Box>{status ? <Text dimColor>{status}</Text> : <Text dimColor>/ でコマンド / Ctrl+C で終了</Text>}</Box>
+            <Box>
+                <Text dimColor>
+                    TL: {tlType === 'home' ? 'Home' : tlType === 'local' ? 'Local' : tlType === 'social' ? 'Social' : 'Global'}
+                    {'  '}({`1:Home 2:Local 3:Social 4:Global`}){'  '}
+                    {status ? ` ${status}` : '/ でコマンド / Ctrl+C で終了'}
+                </Text>
+            </Box>
         </Box>
     );
 }
