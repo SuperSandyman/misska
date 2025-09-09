@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Text, useApp } from 'ink';
-import TextInput from 'ink-text-input';
 import process from 'node:process';
 import tty from 'node:tty';
 import { URL } from 'node:url';
@@ -17,6 +16,9 @@ import type { TimelineType } from './timeline/endpoints.js';
 import { useAltScreen, useResizeWithOffsetGuard } from './timeline/useAltScreen.js';
 import { useTimelineKeys } from './timeline/useKeys.js';
 import { useCommandSubmit } from './timeline/useSubmit.js';
+import { CommandInput } from './commands/commandInput.js';
+import { PostInput } from './commands/post.js';
+import { ReactionInput } from './commands/reaction.js';
 
 // TimelineNote 型や表示系ユーティリティは utils.ts に集約
 
@@ -307,38 +309,13 @@ export function HomeTimeline({ baseUrl, token }: { baseUrl: string; token: strin
             </Box>
 
             {uiMode === 'command' ? (
-                <Box borderStyle="round" borderColor="cyan" paddingX={1}>
-                    <Text>コマンド: </Text>
-                    <TextInput
-                        value={input}
-                        onChange={setInput}
-                        onSubmit={onSubmit}
-                        placeholder="/post, /reaction, /help, /exit, /refresh"
-                    />
-                </Box>
+                <CommandInput value={input} onChange={setInput} onSubmit={onSubmit} />
             ) : null}
             {uiMode === 'post' ? (
-                <Box borderStyle="round" borderColor="green" paddingX={1}>
-                    <Text>投稿: </Text>
-                    <TextInput
-                        value={input}
-                        onChange={setInput}
-                        onSubmit={onSubmit}
-                        placeholder="Enterで投稿 / Escでキャンセル"
-                    />
-                    {posting ? <Text> 送信中…</Text> : null}
-                </Box>
+                <PostInput value={input} onChange={setInput} onSubmit={onSubmit} posting={posting} />
             ) : null}
             {uiMode === 'reaction' ? (
-                <Box borderStyle="round" borderColor="yellow" paddingX={1}>
-                    <Text>リアクション: </Text>
-                    <TextInput
-                        value={input}
-                        onChange={setInput}
-                        onSubmit={onSubmit}
-                        placeholder=":emoji: や 絵文字を入力 / Escでキャンセル"
-                    />
-                </Box>
+                <ReactionInput value={input} onChange={setInput} onSubmit={onSubmit} />
             ) : null}
 
             <Box>
