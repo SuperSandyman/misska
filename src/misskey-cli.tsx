@@ -3,6 +3,7 @@ import { render, Text, Box } from 'ink';
 import React, { useEffect, useState } from 'react';
 import { randomUUID } from 'node:crypto';
 import process from 'node:process';
+import tty from 'node:tty';
 import console from 'node:console';
 
 import { MisskeyClient, normalizeBaseUrl } from './api/client.js';
@@ -124,6 +125,46 @@ function DefaultApp() {
 }
 
 function main() {
+    // Setup graceful exit banner once
+    (function setupExitBanner() {
+        let shown = false;
+        const show = (msg = '終了処理中…') => {
+            if (shown) return;
+            shown = true;
+            const out = process.stdout as tty.WriteStream;
+            // If stdout is a TTY try to restore the alternate screen and clear; otherwise fall back to stderr
+            if (out && out.isTTY) {
+                try {
+                    // combine escape sequences into a single write to reduce partial writes
+                    out.write('\x1b[?1049l\x1b[2J\x1b[H');
+                    out.write(`${msg}\n`);
+                } catch {
+                    // fallback: attempt to write to stderr
+                    try {
+                        console.error(msg);
+                    } catch {
+                        // give up silently
+                    }
+                }
+            } else {
+                try {
+                    console.error(msg);
+                } catch {
+                    // ignore
+                }
+            }
+        };
+        process.once('beforeExit', () => show());
+        process.once('SIGINT', () => {
+            show('終了処理中… (Ctrl+C)');
+            process.exit(130);
+        });
+        process.once('SIGTERM', () => {
+            show('終了処理中…');
+            process.exit(143);
+        });
+    })();
+
     const args = process.argv.slice(2);
     const cmd = args[0];
     if (cmd === 'login') {
