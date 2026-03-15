@@ -37,7 +37,7 @@ export class MisskeyClient {
     constructor(opts: MisskeyClientOptions) {
         this.baseUrl = normalizeBaseUrl(opts.baseUrl);
         this.token = opts.token;
-        this.userAgent = opts.userAgent ?? 'misskey-cli-client';
+        this.userAgent = opts.userAgent ?? 'misska';
     }
 
     // Generic POST to /api/<endpoint>
@@ -52,7 +52,7 @@ export class MisskeyClient {
                 headers: {
                     'content-type': 'application/json; charset=utf-8',
                     accept: 'application/json',
-                    'user-agent': this.userAgent ?? 'misskey-cli-client'
+                    'user-agent': this.userAgent ?? 'misska'
                 },
                 body: JSON.stringify(payload)
             })) as Response;

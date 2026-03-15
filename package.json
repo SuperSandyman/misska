@@ -1,5 +1,5 @@
 {
-    "name": "misskey-cli-client",
+    "name": "misska",
     "version": "1.0.0",
     "type": "module",
     "bin": {
@@ -15,7 +15,7 @@
     "keywords": [],
     "author": "",
     "license": "ISC",
-    "description": "",
+    "description": "A CLI client for Misskey",
     "devDependencies": {
         "@types/jest": "^30.0.0",
         "@types/node": "^22.9.3",
