@@ -22,7 +22,7 @@ function LoginApp({ baseUrl }: { baseUrl: string }) {
                 const sessionId = randomUUID();
                 const url = buildMiAuthUrl(baseUrl, {
                     sessionId,
-                    name: 'misska',
+                    name: 'misska-cli',
                     permission: ['read:account', 'read:notes', 'write:notes', 'write:reactions']
                 });
                 setMessage(
