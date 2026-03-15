@@ -48,6 +48,46 @@
 			"problemMatcher": [
 				"$tsc"
 			]
+		},
+		{
+			"label": "build-misskey-cli",
+			"type": "shell",
+			"command": "npm run -s build",
+			"problemMatcher": [
+				"$tsc"
+			]
+		},
+		{
+			"label": "build-misskey-cli",
+			"type": "shell",
+			"command": "npm run -s build",
+			"problemMatcher": [
+				"$tsc"
+			]
+		},
+		{
+			"label": "build-misskey-cli",
+			"type": "shell",
+			"command": "npm run -s build",
+			"problemMatcher": [
+				"$tsc"
+			]
+		},
+		{
+			"label": "build-misskey-cli",
+			"type": "shell",
+			"command": "npm run -s build",
+			"problemMatcher": [
+				"$tsc"
+			]
+		},
+		{
+			"label": "build-misskey-cli",
+			"type": "shell",
+			"command": "npm run -s build",
+			"problemMatcher": [
+				"$tsc"
+			]
 		}
 	]
 }

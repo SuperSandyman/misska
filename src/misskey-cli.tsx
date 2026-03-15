@@ -3,11 +3,12 @@ import { render, Text, Box } from 'ink';
 import React, { useEffect, useState } from 'react';
 import { randomUUID } from 'node:crypto';
 import process from 'node:process';
+import tty from 'node:tty';
 import console from 'node:console';
 
-import { MisskeyClient } from './api/client.js';
+import { MisskeyClient, normalizeBaseUrl } from './api/client.js';
 import { buildMiAuthUrl, pollMiAuthToken } from './api/miauth.js';
-import { getMe } from './api/auth.js';
+// import { getMe } from './api/auth.js';
 import { getConfig, setCurrentAccount, findAccountById, type AccountInfo } from './config/appConfig.js';
 import { saveToken, loadToken } from './config/secureStore.js';
 import HomeTimeline from './components/HomeTimeline.js';
@@ -22,19 +23,24 @@ function LoginApp({ baseUrl }: { baseUrl: string }) {
                 const url = buildMiAuthUrl(baseUrl, {
                     sessionId,
                     name: 'misska-cli',
-                    permission: ['read:account', 'write:notes']
+                    permission: ['read:account', 'read:notes', 'write:notes', 'write:reactions']
                 });
-                setMessage(`MiAuth URL を開いて承認してください:\n${url}\n承認を待機中... (キャンセル: Ctrl+C)`);
+                setMessage(
+                    `MiAuth URL を開いて承認してください:\n${url}\n要求権限: read:account, read:notes, write:notes, write:reactions\n承認を待機中... (キャンセル: Ctrl+C)`
+                );
 
-                const anonClient = new MisskeyClient({ baseUrl });
-                const { token } = await pollMiAuthToken(anonClient, sessionId, { timeoutMs: 2 * 60 * 1000 });
-
-                const authed = new MisskeyClient({ baseUrl, token });
-                const me = await getMe(authed);
-                const acct = me.host ? `@${me.username}@${me.host}` : `@${me.username}`;
-                // 永続化
-                const accountId = `${baseUrl}#${me.username}${me.host ? '@' + me.host : ''}`;
-                const account: AccountInfo = { id: accountId, baseUrl, username: me.username, host: me.host ?? null };
+                const normalized = normalizeBaseUrl(baseUrl);
+                const anonClient = new MisskeyClient({ baseUrl: normalized });
+                const { token, user } = await pollMiAuthToken(anonClient, sessionId, { timeoutMs: 2 * 60 * 1000 });
+                const acct = user.host ? `@${user.username}@${user.host}` : `@${user.username}`;
+                // 永続化（MiAuthのuser情報を利用）
+                const accountId = `${normalized}#${user.username}${user.host ? '@' + user.host : ''}`;
+                const account: AccountInfo = {
+                    id: accountId,
+                    baseUrl: normalized,
+                    username: user.username,
+                    host: user.host ?? null
+                };
                 setCurrentAccount(account);
                 await saveToken(accountId, token);
                 setMessage(`ログイン成功: ${acct}`);
@@ -71,15 +77,44 @@ function DefaultApp() {
                     setMessage('トークンが見つかりません。`misska login <instance-url>` を実行してください。');
                     return;
                 }
-                // トークン検証だけ行い、UIへ委譲
-                const client = new MisskeyClient({ baseUrl: acc.baseUrl, token });
-                await getMe(client);
-                setCtx({ baseUrl: acc.baseUrl, token });
-                setMessage('');
-                setReady(true);
+                // トークン検証（/api/i -> read:accountが必要）
+                const client = new MisskeyClient({ baseUrl: normalizeBaseUrl(acc.baseUrl), token });
+                // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+                // @ts-ignore
+                const { getMe } = await import('./api/auth.js');
+                try {
+                    await getMe(client);
+                    setCtx({ baseUrl: acc.baseUrl, token });
+                    setMessage('');
+                    setReady(true);
+                } catch (e) {
+                    const em = (e as Error).message || '';
+                    // ネットワーク層の失敗は警告のみにして続行（後段で UI 側が再試行/表示）
+                    if (em.startsWith('Network fetch failed:')) {
+                        setCtx({ baseUrl: acc.baseUrl, token });
+                        setMessage(
+                            '警告: 起動時のトークン検証に失敗しました（ネットワーク）。後続の画面で再試行します。' +
+                                '\n詳細: ' +
+                                em
+                        );
+                        setReady(true);
+                    } else if (em.startsWith('Misskey API error: PERMISSION_DENIED')) {
+                        setMessage(
+                            'エラー: 権限不足です（read:account 等）。' +
+                                '\nURL とトークンの権限を確認してください。必要なら再ログイン: misska login <instance-url>'
+                        );
+                        // 続行せず待機
+                        setReady(false);
+                    } else {
+                        throw e;
+                    }
+                }
             } catch (e) {
                 const msg = (e as Error).message || 'unknown error';
-                setMessage(`エラー: ${msg}\n再ログイン: misska login <instance-url>`);
+                const hint =
+                    'URL が正しいか（例: https://example.com）、ネットワーク到達性、プロキシ設定、証明書エラーをご確認ください。' +
+                    '\n必要なら再ログイン: misska login <instance-url>';
+                setMessage(`エラー: ${msg}\n${hint}`);
             }
         })();
     }, []);
@@ -90,6 +125,46 @@ function DefaultApp() {
 }
 
 function main() {
+    // Setup graceful exit banner once
+    (function setupExitBanner() {
+        let shown = false;
+        const show = (msg = '終了処理中…') => {
+            if (shown) return;
+            shown = true;
+            const out = process.stdout as tty.WriteStream;
+            // If stdout is a TTY try to restore the alternate screen and clear; otherwise fall back to stderr
+            if (out && out.isTTY) {
+                try {
+                    // combine escape sequences into a single write to reduce partial writes
+                    out.write('\x1b[?1049l\x1b[2J\x1b[H');
+                    out.write(`${msg}\n`);
+                } catch {
+                    // fallback: attempt to write to stderr
+                    try {
+                        console.error(msg);
+                    } catch {
+                        // give up silently
+                    }
+                }
+            } else {
+                try {
+                    console.error(msg);
+                } catch {
+                    // ignore
+                }
+            }
+        };
+        process.once('beforeExit', () => show());
+        process.once('SIGINT', () => {
+            show('終了処理中… (Ctrl+C)');
+            process.exit(130);
+        });
+        process.once('SIGTERM', () => {
+            show('終了処理中…');
+            process.exit(143);
+        });
+    })();
+
     const args = process.argv.slice(2);
     const cmd = args[0];
     if (cmd === 'login') {

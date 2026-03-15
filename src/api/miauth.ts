@@ -1,4 +1,4 @@
-import { MisskeyClient } from './client.js';
+import { MisskeyClient, normalizeBaseUrl } from './client.js';
 import { URLSearchParams } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 
@@ -38,7 +38,7 @@ const buildQuery = (params: Record<string, string | undefined>): URLSearchParams
 };
 
 export const buildMiAuthUrl = (baseUrl: string, opts: MiAuthUrlOptions): string => {
-    const origin = baseUrl.replace(/\/?$/, '');
+    const origin = normalizeBaseUrl(baseUrl);
     const permCsv = opts.permission && opts.permission.length > 0 ? opts.permission.join(',') : undefined;
     const q = buildQuery({
         name: opts.name,
@@ -46,11 +46,6 @@ export const buildMiAuthUrl = (baseUrl: string, opts: MiAuthUrlOptions): string 
         callback: opts.callback,
         permission: permCsv
     });
-    // 互換性のため、permission を繰り返しキーとしても付与し、さらに permissions も付ける
-    if (opts.permission && opts.permission.length > 0) {
-        for (const p of opts.permission) q.append('permission', p);
-        for (const p of opts.permission) q.append('permissions', p);
-    }
     const qstr = q.toString();
     return `${origin}/miauth/${encodeURIComponent(opts.sessionId)}${qstr ? `?${qstr}` : ''}`;
 };
