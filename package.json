@@ -8,14 +8,27 @@
     "scripts": {
         "dev": "tsx src/misskey-cli.tsx",
         "build": "tsc -p .",
+        "prepack": "npm run build",
         "start": "node dist/src/misskey-cli.js",
         "lint": "eslint 'src/**/*.{ts,tsx}'",
-        "test": "jest"
+        "test": "jest --passWithNoTests"
     },
-    "keywords": [],
-    "author": "",
+    "files": [
+        "dist",
+        "README.md"
+    ],
+    "keywords": ["misskey", "cli", "terminal"],
+    "author": "SuperSandyman",
     "license": "ISC",
     "description": "A CLI client for Misskey",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/SuperSandyman/misska.git"
+    },
+    "bugs": {
+        "url": "https://github.com/SuperSandyman/misska/issues"
+    },
+    "homepage": "https://github.com/SuperSandyman/misska#readme",
     "devDependencies": {
         "@types/jest": "^30.0.0",
         "@types/node": "^22.9.3",
