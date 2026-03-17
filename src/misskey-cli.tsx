@@ -9,8 +9,17 @@ import console from 'node:console';
 import { MisskeyClient, normalizeBaseUrl } from './api/client.js';
 import { buildMiAuthUrl, pollMiAuthToken } from './api/miauth.js';
 // import { getMe } from './api/auth.js';
-import { getConfig, setCurrentAccount, findAccountById, type AccountInfo } from './config/appConfig.js';
-import { saveToken, loadToken } from './config/secureStore.js';
+import {
+    findAccountById,
+    getCurrentAccount,
+    listAccounts,
+    resolveAccount,
+    saveAccount,
+    setCurrentAccountId,
+    type AccountInfo
+} from './config/appConfig.js';
+import { buildAccountLabel } from './config/accountState.js';
+import { loadToken, saveToken } from './config/secureStore.js';
 import HomeTimeline from './components/HomeTimeline.js';
 
 function LoginApp({ baseUrl }: { baseUrl: string }) {
@@ -33,17 +42,15 @@ function LoginApp({ baseUrl }: { baseUrl: string }) {
                 const anonClient = new MisskeyClient({ baseUrl: normalized });
                 const { token, user } = await pollMiAuthToken(anonClient, sessionId, { timeoutMs: 2 * 60 * 1000 });
                 const acct = user.host ? `@${user.username}@${user.host}` : `@${user.username}`;
-                // 永続化（MiAuthのuser情報を利用）
-                const accountId = `${normalized}#${user.username}${user.host ? '@' + user.host : ''}`;
-                const account: AccountInfo = {
-                    id: accountId,
+                const account = saveAccount({
                     baseUrl: normalized,
+                    userId: user.id,
                     username: user.username,
-                    host: user.host ?? null
-                };
-                setCurrentAccount(account);
-                await saveToken(accountId, token);
-                setMessage(`ログイン成功: ${acct}`);
+                    host: user.host ?? null,
+                    label: buildAccountLabel(normalized, user.username, user.host ?? null)
+                });
+                await saveToken(account.id, token);
+                setMessage(`ログイン成功: ${acct}\n現在のアカウント: ${account.label}`);
             } catch (e) {
                 const msg = (e as Error).message || 'unknown error';
                 setMessage(`ログイン失敗: ${msg}`);
@@ -58,40 +65,64 @@ function LoginApp({ baseUrl }: { baseUrl: string }) {
     );
 }
 
+interface RuntimeContext {
+    account: AccountInfo;
+    token: string;
+}
+
 function DefaultApp() {
     const [message, setMessage] = useState<string>('');
     const [ready, setReady] = useState(false);
-    const [ctx, setCtx] = useState<{ baseUrl: string; token: string } | null>(null);
+    const [ctx, setCtx] = useState<RuntimeContext | null>(null);
+    const [currentAccountId, setCurrentAccountIdState] = useState<string | null>(() => getCurrentAccount()?.id ?? null);
 
     useEffect(() => {
         (async () => {
             try {
-                const cfg = getConfig();
-                const acc = findAccountById(cfg.currentAccountId ?? null);
+                setReady(false);
+                setCtx(null);
+                const acc = findAccountById(currentAccountId);
                 if (!acc) {
-                    setMessage('未ログインです。`misska login <instance-url>` を実行してください。');
+                    setMessage(
+                        '未ログインです。`misska login <instance-url>` を実行してください。\n保存済み一覧: `misska accounts`'
+                    );
                     return;
                 }
                 const token = await loadToken(acc.id);
-                if (!token) {
-                    setMessage('トークンが見つかりません。`misska login <instance-url>` を実行してください。');
+                const fallbackToken = !token
+                    ? await Promise.any(
+                          (acc.legacyIds ?? []).map(async (legacyId) => {
+                              const legacyToken = await loadToken(legacyId);
+                              if (!legacyToken) throw new Error('missing');
+                              return legacyToken;
+                          })
+                      ).catch(() => null)
+                    : null;
+                const activeToken = token ?? fallbackToken;
+                if (!activeToken) {
+                    setMessage(
+                        'トークンが見つかりません。`misska login <instance-url>` を実行してください。\n保存済み一覧: `misska accounts`'
+                    );
                     return;
                 }
                 // トークン検証（/api/i -> read:accountが必要）
-                const client = new MisskeyClient({ baseUrl: normalizeBaseUrl(acc.baseUrl), token });
+                const client = new MisskeyClient({ baseUrl: normalizeBaseUrl(acc.baseUrl), token: activeToken });
                 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
                 // @ts-ignore
                 const { getMe } = await import('./api/auth.js');
                 try {
                     await getMe(client);
-                    setCtx({ baseUrl: acc.baseUrl, token });
+                    if (!token && fallbackToken) {
+                        await saveToken(acc.id, fallbackToken);
+                    }
+                    setCtx({ account: acc, token: activeToken });
                     setMessage('');
                     setReady(true);
                 } catch (e) {
                     const em = (e as Error).message || '';
                     // ネットワーク層の失敗は警告のみにして続行（後段で UI 側が再試行/表示）
                     if (em.startsWith('Network fetch failed:')) {
-                        setCtx({ baseUrl: acc.baseUrl, token });
+                        setCtx({ account: acc, token: activeToken });
                         setMessage(
                             '警告: 起動時のトークン検証に失敗しました（ネットワーク）。後続の画面で再試行します。' +
                                 '\n詳細: ' +
@@ -117,16 +148,66 @@ function DefaultApp() {
                 setMessage(`エラー: ${msg}\n${hint}`);
             }
         })();
-    }, []);
+    }, [currentAccountId]);
+
+    const switchAccount = async (query: string) => {
+        const target = resolveAccount(query);
+        if (!target) {
+            throw new Error(`アカウントが見つかりません: ${query}\n一覧: misska accounts`);
+        }
+        setCurrentAccountId(target.id);
+        setCurrentAccountIdState(target.id);
+        setMessage(`切替中: ${target.label}`);
+    };
 
     if (message && !ready) return <Text>{message}</Text>;
     if (!ctx) return <Text>初期化中…</Text>;
-    return <HomeTimeline baseUrl={ctx.baseUrl} token={ctx.token} />;
+    return (
+        <HomeTimeline
+            key={ctx.account.id}
+            accountLabel={ctx.account.label ?? ctx.account.id}
+            baseUrl={ctx.account.baseUrl}
+            token={ctx.token}
+            currentAccountId={ctx.account.id}
+            onSwitchAccount={switchAccount}
+        />
+    );
 }
 
+const formatAccountLine = (account: AccountInfo, currentId: string | null): string =>
+    `${account.id === currentId ? '*' : ' '} ${account.label ?? account.id} -> ${account.baseUrl}`;
+
+const printAccounts = (): void => {
+    const current = getCurrentAccount();
+    const accounts = listAccounts();
+    if (accounts.length === 0) {
+        console.log('保存済みアカウントはありません。`misska login <instance-url>` を実行してください。');
+        return;
+    }
+    console.log(
+        ['保存済みアカウント:', ...accounts.map((account) => formatAccountLine(account, current?.id ?? null))].join('\n')
+    );
+};
+
+const runUseCommand = (query: string | undefined): void => {
+    if (!query) {
+        console.error('Usage: misska use <account>');
+        process.exitCode = 1;
+        return;
+    }
+    const target = resolveAccount(query);
+    if (!target) {
+        console.error(`アカウントが見つかりません: ${query}`);
+        printAccounts();
+        process.exitCode = 1;
+        return;
+    }
+    setCurrentAccountId(target.id);
+    console.log(`現在のアカウントを切り替えました: ${target.label ?? target.id}`);
+};
+
 function main() {
-    // Setup graceful exit banner once
-    (function setupExitBanner() {
+    const setupExitBanner = () => {
         let shown = false;
         const show = (msg = '終了処理中…') => {
             if (shown) return;
@@ -163,7 +244,7 @@ function main() {
             show('終了処理中…');
             process.exit(143);
         });
-    })();
+    };
 
     const args = process.argv.slice(2);
     const cmd = args[0];
@@ -175,10 +256,20 @@ function main() {
             process.exitCode = 1;
             return;
         }
+        setupExitBanner();
         render(<LoginApp baseUrl={baseUrl} />);
         return;
     }
+    if (cmd === 'accounts') {
+        printAccounts();
+        return;
+    }
+    if (cmd === 'use') {
+        runUseCommand(args.slice(1).join(' ').trim() || undefined);
+        return;
+    }
 
+    setupExitBanner();
     render(<DefaultApp />);
 }
 

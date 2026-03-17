@@ -22,7 +22,14 @@ import { ReactionInput } from './commands/reaction.js';
 
 // TimelineNote 型や表示系ユーティリティは utils.ts に集約
 
-export function HomeTimeline({ baseUrl, token }: { baseUrl: string; token: string }) {
+export function HomeTimeline(props: {
+    accountLabel: string;
+    baseUrl: string;
+    token: string;
+    currentAccountId: string;
+    onSwitchAccount: (query: string) => Promise<void>;
+}) {
+    const { accountLabel, baseUrl, token, currentAccountId, onSwitchAccount } = props;
     // 端末行数を取得
     const initialRows = (() => {
         const out = process.stdout as tty.WriteStream;
@@ -281,6 +288,8 @@ export function HomeTimeline({ baseUrl, token }: { baseUrl: string; token: strin
         apiRequest: (endpoint, body) => httpClient.post(endpoint, body),
         fetchLatestNote: () => httpClient.fetchLatestNote(),
         fetchFresh: (limit: number) => fetchTimeline(httpClient, tlType as TimelineType, limit),
+        currentAccountId,
+        switchAccount: onSwitchAccount,
         exit
     });
 
@@ -320,6 +329,8 @@ export function HomeTimeline({ baseUrl, token }: { baseUrl: string; token: strin
 
             <Box>
                 <Text dimColor>
+                    Account: {accountLabel}
+                    {'  '}
                     TL:{' '}
                     {tlType === 'home'
                         ? 'Home'
