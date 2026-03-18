@@ -6,8 +6,8 @@ import { setTimeout as nodeSetTimeout } from 'node:timers';
 export const useTimelineKeys = (params: {
     screen: 'timeline' | 'info';
     setScreen: (s: 'timeline' | 'info') => void;
-    uiMode: 'timeline' | 'command' | 'post' | 'reaction';
-    setUiMode: (m: 'timeline' | 'command' | 'post' | 'reaction') => void;
+    uiMode: 'timeline' | 'command' | 'post' | 'reaction' | 'account';
+    setUiMode: (m: 'timeline' | 'command' | 'post' | 'reaction' | 'account') => void;
     input: string;
     setInput: (s: string) => void;
     notesLength: number;

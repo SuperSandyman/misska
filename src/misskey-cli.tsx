@@ -174,8 +174,8 @@ function DefaultApp() {
     );
 }
 
-const formatAccountLine = (account: AccountInfo, currentId: string | null): string =>
-    `${account.id === currentId ? '*' : ' '} ${account.label ?? account.id} -> ${account.baseUrl}`;
+const formatAccountLine = (account: AccountInfo, currentId: string | null, index: number): string =>
+    `${account.id === currentId ? '(x)' : '( )'} ${index}. ${account.label ?? account.id} -> ${account.baseUrl}`;
 
 const printAccounts = (): void => {
     const current = getCurrentAccount();
@@ -185,13 +185,15 @@ const printAccounts = (): void => {
         return;
     }
     console.log(
-        ['保存済みアカウント:', ...accounts.map((account) => formatAccountLine(account, current?.id ?? null))].join('\n')
+        ['保存済みアカウント:', ...accounts.map((account, index) => formatAccountLine(account, current?.id ?? null, index + 1))].join(
+            '\n'
+        )
     );
 };
 
 const runUseCommand = (query: string | undefined): void => {
     if (!query) {
-        console.error('Usage: misska use <account>');
+        console.error('Usage: misska use <number|account>');
         process.exitCode = 1;
         return;
     }
@@ -260,7 +262,7 @@ function main() {
         render(<LoginApp baseUrl={baseUrl} />);
         return;
     }
-    if (cmd === 'accounts') {
+    if (cmd === 'account' || cmd === 'accounts') {
         printAccounts();
         return;
     }

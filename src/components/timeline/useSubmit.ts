@@ -1,5 +1,6 @@
 import { useCallback } from 'react';
 import type { TimelineNote } from './utils.js';
+import { openAccount } from '../commands/account.js';
 import type { CommandContext } from '../commands/types.js';
 import { showAccounts } from '../commands/accounts.js';
 import { help } from '../commands/help.js';
@@ -10,7 +11,7 @@ import { reaction as reactionCmd } from '../commands/reaction.js';
 import { startPost } from '../commands/post.js';
 import { useAccount } from '../commands/use.js';
 
-export type UIMode = 'timeline' | 'command' | 'post' | 'reaction';
+export type UIMode = 'timeline' | 'command' | 'post' | 'reaction' | 'account';
 
 export const useCommandSubmit = (params: {
     uiMode: UIMode;
@@ -32,6 +33,7 @@ export const useCommandSubmit = (params: {
     fetchLatestNote: () => Promise<unknown | null>;
     fetchFresh: (limit: number) => Promise<TimelineNote[]>;
     currentAccountId: string;
+    openAccountSwitcher: () => void;
     switchAccount: (query: string) => Promise<void>;
     exit: () => void;
 }) => {
@@ -55,6 +57,7 @@ export const useCommandSubmit = (params: {
         fetchLatestNote,
         fetchFresh,
         currentAccountId,
+        openAccountSwitcher,
         switchAccount,
         exit
     } = params;
@@ -88,9 +91,11 @@ export const useCommandSubmit = (params: {
                 apiRequest,
                 fetchLatestNote,
                 fetchFresh,
+                openAccountSwitcher,
                 switchAccount,
                 exit
             };
+            if (cmd === '/account') return await openAccount(ctx);
             if (cmd === '/accounts') return await showAccounts(ctx);
             if (cmd === '/use') return await useAccount(ctx, parts.slice(1).join(' '));
             if (cmd === '/post') return await startPost(ctx);
@@ -159,6 +164,7 @@ export const useCommandSubmit = (params: {
         fetchLatestNote,
         apiRequest,
         currentAccountId,
+        openAccountSwitcher,
         switchAccount,
         exit
     ]);

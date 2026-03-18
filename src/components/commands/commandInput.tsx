@@ -15,7 +15,7 @@ export function CommandInput(props: {
                 value={value}
                 onChange={onChange}
                 onSubmit={onSubmit}
-                placeholder="/accounts, /use, /post, /reaction, /help, /exit, /refresh"
+                placeholder="/account, /use 2, /post, /reaction, /help, /exit, /refresh"
             />
         </Box>
     );

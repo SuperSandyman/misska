@@ -1,9 +1,9 @@
 import { listAccounts, type AccountInfo } from '../../config/appConfig.js';
 import type { CommandContext } from './types.js';
 
-const formatLine = (account: AccountInfo, currentAccountId: string): string => {
-    const marker = account.id === currentAccountId ? '*' : ' ';
-    return `${marker} ${account.label} -> ${account.baseUrl}`;
+const formatLine = (account: AccountInfo, currentAccountId: string, index: number): string => {
+    const marker = account.id === currentAccountId ? '(x)' : '( )';
+    return `${marker} ${index}. ${account.label} -> ${account.baseUrl}`;
 };
 
 export const formatAccountsList = (currentAccountId: string): string => {
@@ -14,10 +14,10 @@ export const formatAccountsList = (currentAccountId: string): string => {
 
     return [
         '保存済みアカウント:',
-        ...accounts.map((account) => formatLine(account, currentAccountId)),
+        ...accounts.map((account, index) => formatLine(account, currentAccountId, index + 1)),
         '',
-        '切替: /use <account>',
-        'CLI: misska use <account>'
+        'TUI: /account -> j/k -> Enter',
+        'CLI: misska account / misska use <number|account>'
     ].join('\n');
 };
 

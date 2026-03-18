@@ -3,7 +3,7 @@ import type { CommandContext } from './types.js';
 export async function useAccount(ctx: CommandContext, arg: string): Promise<void> {
     const target = arg.trim();
     if (!target) {
-        ctx.setError('使い方: /use <account>');
+        ctx.setError('使い方: /use <number|account>');
         ctx.setUiMode('timeline');
         return;
     }

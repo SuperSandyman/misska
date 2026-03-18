@@ -1,4 +1,10 @@
-import { buildAccountId, buildAccountLabel, buildLegacyAccountId, migrateConfigState } from './accountState.js';
+import {
+    buildAccountId,
+    buildAccountLabel,
+    buildLegacyAccountId,
+    migrateConfigState,
+    resolveAccountInState
+} from './accountState.js';
 
 describe('appConfig helpers', () => {
     test('buildAccountId prefers stable user id', () => {
@@ -53,5 +59,28 @@ describe('appConfig helpers', () => {
         expect(state.currentAccountId).toBe('https://a.example#user:1');
         expect(state.accounts).toHaveLength(2);
         expect(state.accounts[0]?.legacyIds).toEqual(['https://a.example#alice@a.example']);
+    });
+
+    test('resolveAccountInState supports numbered selectors', () => {
+        const state = migrateConfigState({
+            accounts: [
+                {
+                    id: 'https://a.example#user:1',
+                    baseUrl: 'https://a.example',
+                    userId: '1',
+                    username: 'same',
+                    host: 'a.example'
+                },
+                {
+                    id: 'https://b.example#user:2',
+                    baseUrl: 'https://b.example',
+                    userId: '2',
+                    username: 'same',
+                    host: 'b.example'
+                }
+            ]
+        });
+
+        expect(resolveAccountInState(state, '2')?.id).toBe('https://b.example#user:2');
     });
 });

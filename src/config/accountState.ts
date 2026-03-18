@@ -118,6 +118,11 @@ export const resolveAccountInState = (state: AppConfigState, query: string): Acc
     const normalizedQuery = query.trim();
     if (!normalizedQuery) return undefined;
 
+    if (/^\d+$/.test(normalizedQuery)) {
+        const index = Number.parseInt(normalizedQuery, 10) - 1;
+        return state.accounts[index];
+    }
+
     const lower = normalizedQuery.toLowerCase();
     return state.accounts.find((account) => {
         const candidates = uniq([
