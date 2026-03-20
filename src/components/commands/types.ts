@@ -1,8 +1,9 @@
 import type { TimelineNote } from '../timeline/utils.js';
 
-export type UIMode = 'timeline' | 'command' | 'post' | 'reaction';
+export type UIMode = 'timeline' | 'command' | 'post' | 'reaction' | 'account';
 
 export interface CommandContext {
+    currentAccountId: string;
     uiMode: UIMode;
     setUiMode: (m: UIMode) => void;
     setInput: (s: string) => void;
@@ -18,6 +19,7 @@ export interface CommandContext {
     apiRequest: <T = unknown>(endpoint: string, body?: unknown) => Promise<T>;
     fetchLatestNote: () => Promise<unknown | null>;
     fetchFresh: (limit: number) => Promise<TimelineNote[]>;
+    openAccountSwitcher: () => void;
+    switchAccount: (query: string) => Promise<void>;
     exit: () => void;
 }
-

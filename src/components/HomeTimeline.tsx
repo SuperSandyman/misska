@@ -17,12 +17,20 @@ import { useAltScreen, useResizeWithOffsetGuard } from './timeline/useAltScreen.
 import { useTimelineKeys } from './timeline/useKeys.js';
 import { useCommandSubmit } from './timeline/useSubmit.js';
 import { CommandInput } from './commands/commandInput.js';
+import { AccountSwitcher } from './commands/accountSwitcher.js';
 import { PostInput } from './commands/post.js';
 import { ReactionInput } from './commands/reaction.js';
 
 // TimelineNote 型や表示系ユーティリティは utils.ts に集約
 
-export function HomeTimeline({ baseUrl, token }: { baseUrl: string; token: string }) {
+export function HomeTimeline(props: {
+    accountLabel: string;
+    baseUrl: string;
+    token: string;
+    currentAccountId: string;
+    onSwitchAccount: (query: string) => Promise<void>;
+}) {
+    const { accountLabel, baseUrl, token, currentAccountId, onSwitchAccount } = props;
     // 端末行数を取得
     const initialRows = (() => {
         const out = process.stdout as tty.WriteStream;
@@ -39,11 +47,11 @@ export function HomeTimeline({ baseUrl, token }: { baseUrl: string; token: strin
     // 画面モード: タイムライン/情報オーバーレイ
     const [screen, setScreen] = useState<'timeline' | 'info'>('timeline');
     // 操作モード: タイムライン/コマンド/投稿/リアクション
-    const [uiMode, setUiMode] = useState<'timeline' | 'command' | 'post' | 'reaction'>('timeline');
+    const [uiMode, setUiMode] = useState<'timeline' | 'command' | 'post' | 'reaction' | 'account'>('timeline');
     // タイムライン種別
     const [tlType, setTlType] = useState<'home' | 'local' | 'social' | 'global'>('home');
     // 下部固定領域: ステータス1行 + （入力ボックス表示時は枠含め概算3行） + エラー行（上部表示だが簡易に減算）
-    const bottomReserved = 1 + (uiMode === 'timeline' ? 0 : 3) + (error ? 1 : 0);
+    const bottomReserved = 1 + (uiMode === 'command' || uiMode === 'post' || uiMode === 'reaction' ? 3 : 0) + (error ? 1 : 0);
     const [offset, setOffset] = useState<number>(0); // 先頭からのオフセット
     const offsetRef = useRef<number>(0);
     useEffect(() => {
@@ -281,6 +289,9 @@ export function HomeTimeline({ baseUrl, token }: { baseUrl: string; token: strin
         apiRequest: (endpoint, body) => httpClient.post(endpoint, body),
         fetchLatestNote: () => httpClient.fetchLatestNote(),
         fetchFresh: (limit: number) => fetchTimeline(httpClient, tlType as TimelineType, limit),
+        currentAccountId,
+        openAccountSwitcher: () => setUiMode('account'),
+        switchAccount: onSwitchAccount,
         exit
     });
 
@@ -295,6 +306,14 @@ export function HomeTimeline({ baseUrl, token }: { baseUrl: string; token: strin
             <Box flexDirection="column" flexGrow={1}>
                 {screen === 'info' ? (
                     <Text color="cyan">{info ?? ''}</Text>
+                ) : uiMode === 'account' ? (
+                    <AccountSwitcher
+                        currentAccountId={currentAccountId}
+                        onCancel={() => setUiMode('timeline')}
+                        onSelect={async (query) => {
+                            await onSwitchAccount(query);
+                        }}
+                    />
                 ) : notes.length === 0 && !status ? (
                     <Text color="gray">ノートがありません</Text>
                 ) : (
@@ -320,6 +339,8 @@ export function HomeTimeline({ baseUrl, token }: { baseUrl: string; token: strin
 
             <Box>
                 <Text dimColor>
+                    Account: {accountLabel}
+                    {'  '}
                     TL:{' '}
                     {tlType === 'home'
                         ? 'Home'

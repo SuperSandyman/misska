@@ -4,6 +4,9 @@ export async function help(ctx: CommandContext): Promise<void> {
     ctx.setInfo(
         [
             '使い方:',
+            '  • /account  保存済みアカウント一覧を開き、j/k と Enter で切り替える',
+            '  • /accounts 一覧表示のみ（互換コマンド）',
+            '  • /use <number|account> アカウントを切り替える',
             '  • /post     投稿モードに入る',
             '  • /reaction [絵文字]  先頭ノートにリアクション（例: /reaction ❤️ や /reaction :kusa:）',
             '  • /refresh  最新データを強制取得',
@@ -16,4 +19,3 @@ export async function help(ctx: CommandContext): Promise<void> {
     ctx.setScreen('info');
     ctx.setUiMode('timeline');
 }
-

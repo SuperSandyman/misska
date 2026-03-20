@@ -45,5 +45,6 @@
         "esModuleInterop": false,
         "moduleResolution": "bundler"
     },
-    "include": ["src/**/*"]
+    "include": ["src/**/*"],
+    "exclude": ["src/**/*.test.ts"]
 }

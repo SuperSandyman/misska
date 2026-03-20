@@ -1,14 +1,17 @@
 import { useCallback } from 'react';
 import type { TimelineNote } from './utils.js';
+import { openAccount } from '../commands/account.js';
 import type { CommandContext } from '../commands/types.js';
+import { showAccounts } from '../commands/accounts.js';
 import { help } from '../commands/help.js';
 import { refresh } from '../commands/refresh.js';
 import { latest } from '../commands/latest.js';
 import { doExit } from '../commands/exit.js';
 import { reaction as reactionCmd } from '../commands/reaction.js';
 import { startPost } from '../commands/post.js';
+import { useAccount } from '../commands/use.js';
 
-export type UIMode = 'timeline' | 'command' | 'post' | 'reaction';
+export type UIMode = 'timeline' | 'command' | 'post' | 'reaction' | 'account';
 
 export const useCommandSubmit = (params: {
     uiMode: UIMode;
@@ -29,6 +32,9 @@ export const useCommandSubmit = (params: {
     apiRequest: <T = unknown>(endpoint: string, body?: unknown) => Promise<T>;
     fetchLatestNote: () => Promise<unknown | null>;
     fetchFresh: (limit: number) => Promise<TimelineNote[]>;
+    currentAccountId: string;
+    openAccountSwitcher: () => void;
+    switchAccount: (query: string) => Promise<void>;
     exit: () => void;
 }) => {
     const {
@@ -50,6 +56,9 @@ export const useCommandSubmit = (params: {
         apiRequest,
         fetchLatestNote,
         fetchFresh,
+        currentAccountId,
+        openAccountSwitcher,
+        switchAccount,
         exit
     } = params;
 
@@ -66,6 +75,7 @@ export const useCommandSubmit = (params: {
             setInput('');
             setError(null);
             const ctx: CommandContext = {
+                currentAccountId,
                 uiMode,
                 setUiMode,
                 setInput,
@@ -81,8 +91,13 @@ export const useCommandSubmit = (params: {
                 apiRequest,
                 fetchLatestNote,
                 fetchFresh,
+                openAccountSwitcher,
+                switchAccount,
                 exit
             };
+            if (cmd === '/account') return await openAccount(ctx);
+            if (cmd === '/accounts') return await showAccounts(ctx);
+            if (cmd === '/use') return await useAccount(ctx, parts.slice(1).join(' '));
             if (cmd === '/post') return await startPost(ctx);
             if (cmd === '/reaction' || cmd === '/react') return await reactionCmd(ctx, parts.slice(1).join(' ').trim());
             if (cmd === '/help') return await help(ctx);
@@ -138,5 +153,19 @@ export const useCommandSubmit = (params: {
             }
             return;
         }
-    }, [uiMode, input, notes, offset, posting, sortNotesByDate, fetchFresh, fetchLatestNote, apiRequest, exit]);
+    }, [
+        uiMode,
+        input,
+        notes,
+        offset,
+        posting,
+        sortNotesByDate,
+        fetchFresh,
+        fetchLatestNote,
+        apiRequest,
+        currentAccountId,
+        openAccountSwitcher,
+        switchAccount,
+        exit
+    ]);
 };
