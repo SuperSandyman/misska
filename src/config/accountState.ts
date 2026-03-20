@@ -1,3 +1,5 @@
+import { URL } from 'node:url';
+
 import { normalizeBaseUrl } from '../api/client.js';
 
 export interface AccountInfo {

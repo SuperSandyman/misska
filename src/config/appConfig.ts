@@ -25,18 +25,43 @@ const persistConfig = (state: AppConfigState): void => {
     conf.delete('host');
 };
 
+const readConfigSchema = (): AppConfigSchema => ({
+    ...(conf.get('currentAccountId') !== undefined ? { currentAccountId: conf.get('currentAccountId') } : {}),
+    ...(conf.get('accounts') !== undefined ? { accounts: conf.get('accounts') } : {}),
+    ...(conf.get('themeColors') !== undefined ? { themeColors: conf.get('themeColors') } : {}),
+    ...(conf.get('baseUrl') !== undefined ? { baseUrl: conf.get('baseUrl') } : {}),
+    ...(conf.get('accountId') !== undefined ? { accountId: conf.get('accountId') } : {}),
+    ...(conf.get('username') !== undefined ? { username: conf.get('username') } : {}),
+    ...(conf.get('host') !== undefined ? { host: conf.get('host') } : {})
+});
+
+const hasLegacyConfig = (state: AppConfigSchema): boolean =>
+    state.baseUrl !== undefined ||
+    state.accountId !== undefined ||
+    state.username !== undefined ||
+    state.host !== undefined;
+
+const isPersistRequired = (input: AppConfigSchema, migrated: AppConfigState): boolean => {
+    if (hasLegacyConfig(input)) return true;
+
+    const currentAccountId = input.currentAccountId ?? null;
+    const accounts = input.accounts ?? [];
+    const themeColors = input.themeColors ?? {};
+
+    return (
+        currentAccountId !== migrated.currentAccountId ||
+        JSON.stringify(accounts) !== JSON.stringify(migrated.accounts) ||
+        JSON.stringify(themeColors) !== JSON.stringify(migrated.themeColors)
+    );
+};
+
 export const getConfig = (): AppConfigState => {
-    const state = migrateConfigState({
-        ...(conf.get('currentAccountId') !== undefined ? { currentAccountId: conf.get('currentAccountId') } : {}),
-        ...(conf.get('accounts') !== undefined ? { accounts: conf.get('accounts') } : {}),
-        ...(conf.get('themeColors') !== undefined ? { themeColors: conf.get('themeColors') } : {}),
-        ...(conf.get('baseUrl') !== undefined ? { baseUrl: conf.get('baseUrl') } : {}),
-        ...(conf.get('accountId') !== undefined ? { accountId: conf.get('accountId') } : {}),
-        ...(conf.get('username') !== undefined ? { username: conf.get('username') } : {}),
-        ...(conf.get('host') !== undefined ? { host: conf.get('host') } : {})
-    });
-    persistConfig(state);
-    return state;
+    const rawState = readConfigSchema();
+    const migratedState = migrateConfigState(rawState);
+    if (isPersistRequired(rawState, migratedState)) {
+        persistConfig(migratedState);
+    }
+    return migratedState;
 };
 
 export const listAccounts = (): AccountInfo[] => getConfig().accounts;
@@ -48,7 +73,7 @@ export const findAccountById = (id: string | null | undefined): AccountInfo | un
 
 export const getCurrentAccount = (): AccountInfo | undefined => {
     const cfg = getConfig();
-    return findAccountById(cfg.currentAccountId);
+    return cfg.accounts.find((account) => account.id === cfg.currentAccountId);
 };
 
 export const saveAccount = (account: Partial<AccountInfo> & Pick<AccountInfo, 'baseUrl'>): AccountInfo => {

@@ -1,3 +1,5 @@
+/* global describe, expect, test */
+
 import {
     buildAccountId,
     buildAccountLabel,

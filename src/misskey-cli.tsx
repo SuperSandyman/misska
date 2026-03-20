@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { render, Text, Box } from 'ink';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { randomUUID } from 'node:crypto';
 import process from 'node:process';
 import tty from 'node:tty';
@@ -70,22 +70,45 @@ interface RuntimeContext {
     token: string;
 }
 
+interface PendingSwitch {
+    targetId: string;
+    resolve: () => void;
+    reject: (error: Error) => void;
+}
+
 function DefaultApp() {
     const [message, setMessage] = useState<string>('');
     const [ready, setReady] = useState(false);
     const [ctx, setCtx] = useState<RuntimeContext | null>(null);
     const [currentAccountId, setCurrentAccountIdState] = useState<string | null>(() => getCurrentAccount()?.id ?? null);
+    const pendingSwitchRef = useRef<PendingSwitch | null>(null);
+
+    const resolvePendingSwitch = (accountId: string) => {
+        if (pendingSwitchRef.current?.targetId !== accountId) return;
+        pendingSwitchRef.current.resolve();
+        pendingSwitchRef.current = null;
+    };
+
+    const rejectPendingSwitch = (accountId: string | null, error: Error) => {
+        if (!accountId || pendingSwitchRef.current?.targetId !== accountId) return;
+        pendingSwitchRef.current.reject(error);
+        pendingSwitchRef.current = null;
+    };
 
     useEffect(() => {
+        let active = true;
+
         (async () => {
             try {
                 setReady(false);
                 setCtx(null);
                 const acc = findAccountById(currentAccountId);
                 if (!acc) {
+                    if (!active) return;
                     setMessage(
                         '未ログインです。`misska login <instance-url>` を実行してください。\n保存済み一覧: `misska accounts`'
                     );
+                    rejectPendingSwitch(currentAccountId, new Error('切り替え先のアカウントが見つかりません。'));
                     return;
                 }
                 const token = await loadToken(acc.id);
@@ -100,9 +123,11 @@ function DefaultApp() {
                     : null;
                 const activeToken = token ?? fallbackToken;
                 if (!activeToken) {
+                    if (!active) return;
                     setMessage(
                         'トークンが見つかりません。`misska login <instance-url>` を実行してください。\n保存済み一覧: `misska accounts`'
                     );
+                    rejectPendingSwitch(acc.id, new Error(`トークンが見つかりません: ${acc.label ?? acc.id}`));
                     return;
                 }
                 // トークン検証（/api/i -> read:accountが必要）
@@ -112,13 +137,16 @@ function DefaultApp() {
                 const { getMe } = await import('./api/auth.js');
                 try {
                     await getMe(client);
+                    if (!active) return;
                     if (!token && fallbackToken) {
                         await saveToken(acc.id, fallbackToken);
                     }
                     setCtx({ account: acc, token: activeToken });
                     setMessage('');
                     setReady(true);
+                    resolvePendingSwitch(acc.id);
                 } catch (e) {
+                    if (!active) return;
                     const em = (e as Error).message || '';
                     // ネットワーク層の失敗は警告のみにして続行（後段で UI 側が再試行/表示）
                     if (em.startsWith('Network fetch failed:')) {
@@ -129,6 +157,7 @@ function DefaultApp() {
                                 em
                         );
                         setReady(true);
+                        resolvePendingSwitch(acc.id);
                     } else if (em.startsWith('Misskey API error: PERMISSION_DENIED')) {
                         setMessage(
                             'エラー: 権限不足です（read:account 等）。' +
@@ -136,18 +165,29 @@ function DefaultApp() {
                         );
                         // 続行せず待機
                         setReady(false);
+                        rejectPendingSwitch(
+                            acc.id,
+                            new Error(`権限不足のためアカウントを有効化できません: ${acc.label ?? acc.id}`)
+                        );
                     } else {
+                        rejectPendingSwitch(acc.id, e as Error);
                         throw e;
                     }
                 }
             } catch (e) {
+                if (!active) return;
                 const msg = (e as Error).message || 'unknown error';
                 const hint =
                     'URL が正しいか（例: https://example.com）、ネットワーク到達性、プロキシ設定、証明書エラーをご確認ください。' +
-                    '\n必要なら再ログイン: misska login <instance-url>';
+                        '\n必要なら再ログイン: misska login <instance-url>';
                 setMessage(`エラー: ${msg}\n${hint}`);
+                rejectPendingSwitch(currentAccountId, e as Error);
             }
         })();
+
+        return () => {
+            active = false;
+        };
     }, [currentAccountId]);
 
     const switchAccount = async (query: string) => {
@@ -155,9 +195,18 @@ function DefaultApp() {
         if (!target) {
             throw new Error(`アカウントが見つかりません: ${query}\n一覧: misska accounts`);
         }
+        setReady(false);
+        setCtx(null);
+        setMessage(`切替中: ${target.label}`);
         setCurrentAccountId(target.id);
         setCurrentAccountIdState(target.id);
-        setMessage(`切替中: ${target.label}`);
+        await new Promise<void>((resolve, reject) => {
+            pendingSwitchRef.current = {
+                targetId: target.id,
+                resolve,
+                reject
+            };
+        });
     };
 
     if (message && !ready) return <Text>{message}</Text>;
