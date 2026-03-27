@@ -17,6 +17,9 @@
         "dist",
         "README.md"
     ],
+    "publishConfig": {
+        "access": "public"
+    },
     "keywords": ["misskey", "cli", "terminal"],
     "author": "SuperSandyman",
     "license": "ISC",
