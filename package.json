@@ -20,7 +20,11 @@
     "publishConfig": {
         "access": "public"
     },
-    "keywords": ["misskey", "cli", "terminal"],
+    "keywords": [
+        "misskey",
+        "cli",
+        "terminal"
+    ],
     "author": "SuperSandyman",
     "license": "ISC",
     "description": "A CLI client for Misskey",
@@ -33,28 +37,32 @@
     },
     "homepage": "https://github.com/SuperSandyman/misska#readme",
     "devDependencies": {
+        "@eslint/js": "^10.0.1",
         "@types/jest": "^30.0.0",
-        "@types/node": "^22.9.3",
-        "@types/react": "^19.0.0",
-        "@typescript-eslint/eslint-plugin": "^8.39.0",
-        "@typescript-eslint/parser": "^8.39.0",
-        "eslint": "^9.32.0",
-        "jest": "^30.0.5",
-        "prettier": "^3.6.2",
-        "ts-jest": "^29.4.1",
-        "tsx": "^4.20.3",
-        "typescript": "^5.9.2"
+        "@types/node": "^26.0.0",
+        "@types/react": "^19.2.17",
+        "@typescript-eslint/eslint-plugin": "^8.61.1",
+        "@typescript-eslint/parser": "^8.61.1",
+        "eslint": "^10.5.0",
+        "jest": "^30.4.2",
+        "prettier": "^3.8.4",
+        "ts-jest": "^29.4.11",
+        "tsx": "^4.22.4",
+        "typescript": "^6.0.3"
     },
     "dependencies": {
-        "conf": "^14.0.0",
-        "ink": "^6.1.0",
+        "conf": "^15.1.0",
+        "ink": "^7.1.0",
         "ink-select-input": "^6.2.0",
         "ink-text-input": "^6.0.0",
         "keytar": "^7.9.0",
-        "misskey-js": "^2025.8.0-alpha.9",
-        "react": "^19.0.0",
-        "undici": "^7.13.0",
-        "ws": "^8.18.3",
-        "zustand": "^5.0.7"
+        "misskey-js": "^2026.6.0-beta.1",
+        "react": "^19.2.7",
+        "undici": "^8.5.0",
+        "ws": "^8.21.0",
+        "zustand": "^5.0.14"
+    },
+    "overrides": {
+        "js-yaml": "^4.2.0"
     }
 }
